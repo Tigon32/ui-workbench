@@ -8,6 +8,17 @@ and a provisional keep. Its 8/9 scores are illustrative generator self-scores.
 They are not independent review, human task results, accessibility evidence or
 proof that a redesign is faster.
 
+`iterations.json` is intentionally format 1: it is a compatibility example, not
+the default for new ledgers. It retains its declared 9/10 and 80% target
+without silently migrating the claim. New-project examples are
+[`project-intake-v2.json`](project-intake-v2.json),
+[`scope-map-v2.json`](scope-map-v2.json) and
+[`attempt-v2-report.example.json`](attempt-v2-report.example.json). These are
+synthetic excerpts; the tests create fully hash-bound local format-2 ledgers
+and exercise incomplete briefs, overlapping scopes, task journeys, freshness,
+decision authority, incompatible mappings and budget stops. No upload or model
+call is required.
+
 Run the same deterministic checks on both pages from the repository root:
 
 ```sh

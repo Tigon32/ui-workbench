@@ -109,10 +109,14 @@ class ProfilesTest(unittest.TestCase):
     def test_desktop_zoom_is_distinct_from_css_reflow_and_is_never_claimed_as_run(self):
         rubric = self.base()
         rubric["target_platforms"]["mobile"] = False
+        rubric["target_platforms"]["tablet"] = False
+        rubric["target_platforms"]["laptop"] = False
+        rubric["target_platforms"]["wide"] = False
         rubric["desktop_zoom"] = {"percentages": [100, 125, 150, 200]}
         with tempfile.TemporaryDirectory() as temp:
             result = PROFILES.load_rubric(self.write_rubric(temp, rubric))
             declared = PROFILES.metadata(result)
+        self.assertEqual(result["profiles"], {"desktop": 1920})
         self.assertEqual(declared["reflow"], {
             "width": 320, "label": "zoom/reflow (not phone)",
         })

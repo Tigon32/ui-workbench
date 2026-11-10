@@ -1,0 +1,35 @@
+{
+  "scopes": [
+    {"id": "record-card", "kind": "component", "name": "Record card"},
+    {"id": "overview-summary", "kind": "region", "name": "Overview summary"},
+    {"id": "overview-page", "kind": "page", "name": "Overview"},
+    {"id": "error-state", "kind": "state", "name": "Long-text error"},
+    {
+      "id": "find-and-save",
+      "kind": "journey",
+      "name": "Find a record and save it",
+      "task_ids": ["find-record", "save-record"]
+    }
+  ],
+  "points": [
+    {
+      "id": "record-identity",
+      "selected": true,
+      "scopes": ["record-card", "overview-summary", "overview-page", "find-and-save"]
+    },
+    {
+      "id": "source-exception",
+      "selected": true,
+      "scopes": ["record-card", "overview-summary", "overview-page", "find-and-save"]
+    },
+    {
+      "id": "error-recovery",
+      "selected": true,
+      "scopes": ["error-state", "overview-page"]
+    }
+  ],
+  "task_budgets": {
+    "find-record": 3,
+    "save-record": 2
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "synthetic_example": true,
+  "reviewer": {
+    "kind": "generator_self_assessment",
+    "id": "fixture-author"
+  },
+  "attempt": {
+    "id": 2,
+    "hypothesis": "A coherent page and journey redesign preserves source exceptions and reduces wayfinding friction.",
+    "dimensions": ["source-exception", "record-identity"],
+    "expected_outcomes": [
+      "Keep the exception adjacent to its source.",
+      "Complete the find-and-save task within its declared action budget."
+    ],
+    "actual_outcomes": [
+      "The synthetic source-exception score increased by one.",
+      "The scripted task passed within its budget."
+    ],
+    "actual_evidence": ["synthetic-score-sheet", "synthetic-task-report"],
+    "affected_points": ["source-exception", "record-identity"],
+    "dependencies": ["Use the frozen synthetic fixture and task path."],
+    "guardrails": ["No new deterministic findings or coverage loss."],
+    "regressions": [],
+    "effort_minutes": 18,
+    "decision": "keep",
+    "decision_reason": "Both predeclared gains were observed with no reported regression; retention remains provisional."
+  },
+  "stop": {
+    "reason": "no_gain",
+    "next_round": {
+      "trigger": "no_gain",
+      "action": "revisit_brief",
+      "hypothesis": "Revisit whether the current scenario set captures the journey bottleneck.",
+      "rationale": "Do not change scores or lower the goal to manufacture progress.",
+      "budget_remaining_minutes": 42,
+      "proposed_effort_minutes": 0
+    }
+  },
+  "limitations": [
+    "Illustrative data only; no prototype was evaluated by people.",
+    "Evidence references are synthetic labels, not proof of truth or reviewer independence."
+  ]
+}

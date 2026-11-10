@@ -179,12 +179,13 @@ A changed applicability decision needs fresh evidence and review.
 Critical exclusions require particular human scrutiny.
 The script validates declaration shape, not the truth of the reason.
 
-The project goal is to reach an anchored 9/10 on a selected 80-90% of the
-declared measurement points. With the default 23-point catalogue, that means
-at least 19 points at 80%, or 21 at 90%. Keep the full denominator in reports.
-An unassessed or unsupported point remains visible and does not count as a 9.
-This is a project goal, not an achieved result, adoption threshold or usability
-claim. Record the chosen fraction and selected points before measurement.
+An earlier example project chose an anchored 9/10 on 80-90% of its selected
+measurement points. That is an example, not a workbench-wide goal or adoption
+threshold. With its default 23-point catalogue, it would mean 19 points at
+80%, or 21 at 90%. New format-2 refinement ledgers record each project's own
+score and fraction. Keep the full denominator in reports. An unassessed or
+unsupported point remains visible and does not count toward the goal.
+Record the goal and selected points before measurement.
 The report labels a result `all_declared_points` only when every declared point
 is selected. Otherwise, it labels the result `selected_subset` and lists the
 excluded points. A subset claim is not an overall claim; exclusions remain in
@@ -314,18 +315,117 @@ council for every increment. Final acceptance always needs the fresh review belo
 
 ### Machine-validated iteration ledger
 
-Use the bundled `iterations.py` with the version 1 `iterations.json` format.
-The [synthetic example](examples/refinement/README.md) contains two materially
-different layouts, fixed browser checks, a held-out task, a multi-dimension
-hypothesis and a provisional keep.
+New ledgers use `format_version: 2`. The verifier continues to read format-1
+ledgers with their original declared 9/10 and 80-90% goal semantics; it does not
+silently convert or reinterpret them. The original
+[synthetic comparison example](examples/refinement/README.md) remains format 1
+as a migration/compatibility fixture. The tests construct version-2 ledgers
+from synthetic local artifacts, including scope overlap, stale evidence,
+incompatible mappings and incomplete briefs.
 
-The ledger freezes a `scope_id`, the complete point denominator and selected
-80-90% goal, required scenarios, task budgets, feasibility statement, limits
-and recorded time. Every scenario names its theme, viewport, state and evidence
-type. A source-manifest artifact binds its build ID and the hashes of page
-sources and inputs. Baseline and after score/check artifacts bind their own
-source and build identity. A build may change between attempts; the declared
-scope and coverage may not.
+#### Brief, goal and decision authority
+
+Format 2 binds `contract.brief_ref` to a versioned local JSON brief. It records
+users and jobs, problem, desired outcomes, platforms, scenarios, constraints,
+the project-owned score/fraction, available evidence, budget and stop
+conditions, non-goals, unresolved questions and decision authority. Empty lists,
+nulls and `status: incomplete` are explicit unknowns, not implied answers.
+Incomplete briefs permit labelled exploration. An `adoptable` final review is
+rejected unless the brief is complete, the goal is sponsor-approved, and every
+sponsor-owned decision is approved. A complete brief must state its critical
+users/jobs, problem, outcomes, platforms, scenarios and stop conditions, and
+have no declared `critical_unknowns`; non-critical unresolved questions may
+remain visible.
+
+The project goal is `score` from 1 through 10 and `fraction` in `(0, 1]`.
+That fraction applies to the explicitly selected point denominator; `selected`
+points remain a subset of the full inventory when declared. For example, a
+project may choose 8/10 across 60% of its selected points. This is not a
+workbench-wide threshold. Reports show the full inventory, selected
+denominator, exclusions and unknowns. Unselected points are not silently
+deleted.
+
+`decision_authority` separates sponsor-owned decisions from agent-delegated
+decisions. Each attempt names its decision actor and decision records. An agent
+may act within delegated decisions, but cannot mark a sponsor-owned decision
+approved. A goal decision has a sponsor decision ID; only an approved sponsor
+record can support a final acceptance claim. This records declared authority,
+not independent proof of who acted.
+
+#### Scopes, freshness and evidence coverage
+
+Declare stable `scopes` of kind `component`, `region`, `page`, `state` or
+`journey`; each measurement point lists its scope IDs. A point can contribute
+once to each declared scope denominator, including overlapping region, page
+and journey views, but never twice to the same scope. The report lists each
+scope's inventory and denominator separately from the whole-project goal.
+Journey scopes bind named task IDs from the deterministic check contract.
+Failed or unknown tasks and unassessed points keep the journey visible even if
+its component points score highly. Automated checks and task outcomes remain
+separate from design judgments.
+
+Format-2 score records explicitly use `assessment_state`:
+
+| State | Meaning |
+|---|---|
+| `fresh` | Assessed on the current source; evidence coverage names this point. |
+| `carried_forward` | Historical score from an earlier source; not a current observation. |
+| `stale` | Historical score requiring re-review; a changed/affected point cannot support a current claim until freshly assessed. |
+| `unassessed` | No current score, including unsupported or blocked evidence. |
+
+Each scored point retains `assessed_source_ref`, reviewer kind and identity,
+reason, evidence refs, and `evidence_coverage` for every ref. A coverage entry
+states the point IDs and scenario IDs supported plus its rationale. A shared
+artifact may cover several points when that membership is declared. Missing
+coverage is rejected for a fresh score or reported as a coverage gap; it is
+never treated as a pass. A carried/stale score remains visible but does not
+count toward current goal progress. Affected carried points must be flagged
+stale for re-review; a keep requires fresh assessments of affected points and
+fresh evidence for the claimed target gains.
+
+#### Version history and comparison labels
+
+`version_history` is a parent-linked, ordered sequence binding each version's
+goal, full and selected point IDs, point-to-scope memberships, scope IDs,
+rubric/inventory/scope revisions and material decision artifact. Each appended
+version has a mapping for every old and new point and scope, using explicit
+`same`, `renamed`, `split`, `merged`, `added` or `removed` relationships.
+Any goal, selection, rubric, inventory, point-to-scope or scope revision
+must mark the comparison incompatible and explain why. The report labels
+incompatible or not-yet-measured comparisons; it does not subtract totals,
+drop missing points or imply equivalent denominators.
+
+Like all ledger digests, the version sequence identifies current bytes but
+cannot prove historical immutability or chronology. Preserve append-only
+records in a trusted review system or commit where that guarantee is needed.
+Hashing and metadata do not prove truth, reviewer independence or evidence
+quality.
+
+#### Attempt outcomes, effort and stops
+
+Format-2 attempts also record expected and actual outcomes, affected points,
+dependencies, guardrails, regressions, local evidence references, elapsed
+effort, decision actor/authority and keep/revert rationale. The report includes
+these alongside prior time fields. `no_gain` and `budget` stops require a
+next-round hypothesis and rationale, an action (`revisit_brief`,
+`test_larger_alternative` or `stop_with_reason`) and remaining effort when a
+budget exists. A proposed larger alternative must fit within that remaining
+budget. A plateau suggests revisiting the brief or testing a larger alternative;
+it never authorizes lowering the target or changing scores. No fixed speedup or
+quality gain is presumed.
+
+Use the bundled `iterations.py` to verify or report either format. The
+[synthetic comparison example](examples/refinement/README.md) contains two
+materially different layouts, fixed browser checks, a held-out task, a
+multi-dimension hypothesis and a provisional keep.
+
+The format-1 ledger freezes a `scope_id`, the complete point denominator and
+its selected 80-90% goal, required scenarios, task budgets, feasibility
+statement, limits and recorded time. Every scenario names its theme, viewport,
+state and evidence type. A source-manifest artifact binds its build ID and the
+hashes of page sources and inputs. Baseline and after score/check artifacts
+bind their own source and build identity. A build may change between attempts;
+the declared scope and coverage may not.
 
 Each attempt has a sequential ID, a named hypothesis, target dimensions and
 positive per-dimension gains. A hash-bound proposal must declare these before
