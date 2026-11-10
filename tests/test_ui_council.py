@@ -68,6 +68,19 @@ class CouncilTest(unittest.TestCase):
         COUNCIL.run(run, write=True)
         return COUNCIL.run(run, write=False)
 
+    def test_incomplete_calibration_names_unscored_dimensions(self):
+        incomplete = sheet(
+            "r1", ["A", "B", "W", "S"],
+            {"A": (8, 8), "B": (7, 7), "W": (2, 2), "S": (9, 9)})
+        incomplete["reviewer_kind"] = "model"
+        incomplete["scores"]["W"]["honesty"] = {
+            "why": "The capture does not establish this criterion.",
+            "score": None, "evidence_status": "not_assessed", "evidence": [],
+        }
+        reason = COUNCIL.calibration_exclusion_reason(
+            incomplete, "W", "S", RUBRIC["dimensions"])
+        self.assertEqual(reason, "incomplete calibration (weak: honesty)")
+
     def test_clear_lead_on_critical_dimensions_wins(self):
         scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
         run = self.make([self.round_of([scores, scores])])
@@ -202,7 +215,8 @@ class AdoptionTest(unittest.TestCase):
             scores = {}
             for item, value in (("A", score), ("B", 5), ("W", 2), ("S", 9)):
                 scores[item] = {d["id"]: {"why": REASON, "score": value,
-                                        "evidence_status": "observed", "evidence": ["capture"]}
+                                        "evidence_status": "observed",
+                                        "evidence": [f"{item}/capture"]}
                                 for d in dims}
             sheets.append({"reviewer": f"r{index}", "reviewer_kind": "model", "model": "m",
                            "seed": index, "order": list(items[index:] + items[:index]),
@@ -229,10 +243,16 @@ class AdoptionTest(unittest.TestCase):
                 "reason": "The bundled renderer does not control or verify browser zoom.",
             }
         stored.update(
-            evidence_manifest={"capture": {"path": capture.name, "sha256": hashlib.sha256(capture.read_bytes()).hexdigest()}},
+            evidence_manifest={
+                f"{item}/capture": {
+                    "path": capture.name,
+                    "sha256": hashlib.sha256(capture.read_bytes()).hexdigest(),
+                }
+                for item in items
+            },
             source_sha256={item: "a" * 64 for item in items},
             rubric_sha256=hashlib.sha256((run / "rubric.json").read_bytes()).hexdigest(),
-            adoption_checks={item: {tier: {"status": "pass", "evidence": ["capture"]}
+            adoption_checks={item: {tier: {"status": "pass", "evidence": [f"{item}/capture"]}
                                    for tier in ("tier1", "tier2")} for item in items},
             target_profiles=target_profiles,
         )
@@ -281,14 +301,15 @@ class AdoptionTest(unittest.TestCase):
             "status": "unavailable",
             "reason": "The bundled renderer does not control or verify browser zoom.",
         }
-        capture = meta["evidence_manifest"]["capture"]
-        meta["evidence_manifest"]["css-viewport"] = {
-            **capture, "evidence_type": "css_viewport",
-            "percentages": [100, 125, 150, 200], "source_sha256": "a" * 64,
-        }
+        for item in meta["items"]:
+            capture = meta["evidence_manifest"][f"{item}/capture"]
+            meta["evidence_manifest"][f"{item}/css-viewport"] = {
+                **capture, "evidence_type": "css_viewport",
+                "percentages": [100, 125, 150, 200], "source_sha256": "a" * 64,
+            }
         for item in meta["items"]:
             meta["adoption_checks"][item]["desktop_zoom"] = {
-                "status": "pass", "evidence": ["css-viewport"],
+                "status": "pass", "evidence": [f"{item}/css-viewport"],
             }
         round_path.write_text(json.dumps(meta))
         report = self.report(run)
@@ -349,9 +370,9 @@ class AdoptionTest(unittest.TestCase):
 
     def test_failed_or_missing_gate_blocks_adoption_not_score(self):
         for check in (
-            {"status": "fail", "evidence": ["capture"]},
-            {"status": "unverified", "evidence": ["capture"]},
-            {"status": None, "evidence": ["capture"]},
+            {"status": "fail", "evidence": ["A/capture"]},
+            {"status": "unverified", "evidence": ["A/capture"]},
+            {"status": None, "evidence": ["A/capture"]},
             {"status": "pass", "evidence": [{}]},
         ):
             with self.subTest(check=check):
@@ -415,6 +436,23 @@ class AdoptionTest(unittest.TestCase):
                 with self.assertRaises(COUNCIL.RunError):
                     self.verdict(self.adoption_run(mutate=mutate))
 
+    def test_scoring_and_adoption_evidence_must_be_item_local(self):
+        run = self.adoption_run()
+        sheet_path = run / "round-1/reviewer-r0.json"
+        sheet_data = json.loads(sheet_path.read_text())
+        sheet_data["scores"]["A"]["typography"]["evidence"] = ["B/capture"]
+        sheet_path.write_text(json.dumps(sheet_data))
+        with self.assertRaisesRegex(COUNCIL.RunError, "invalid evidence status or references"):
+            self.verdict(run)
+
+        run = self.adoption_run()
+        round_path = run / "round-1/round.json"
+        meta = json.loads(round_path.read_text())
+        meta["adoption_checks"]["A"]["tier1"]["evidence"] = ["B/capture"]
+        round_path.write_text(json.dumps(meta))
+        report = self.report(run)
+        self.assertIn("tier1 evidence is failed or unverified", report)
+
     def test_nonfinite_bool_and_malformed_thresholds_refuse(self):
         for value in (float("nan"), float("inf"), True, -1, 101):
             with self.subTest(value=value):
@@ -452,7 +490,7 @@ class AdoptionTest(unittest.TestCase):
         (run / "round-1/synthetic-evidence.txt").write_text("Controlled stale-evidence defect.")
         with contextlib.redirect_stderr(io.StringIO()) as error:
             self.assertEqual(COUNCIL.main(["--verify", str(run)]), 1)
-        self.assertIn("evidence capture changed", error.getvalue())
+        self.assertIn("evidence A/capture changed", error.getvalue())
 
     def test_legacy_gate_cannot_claim_evidence_bound_adoption(self):
         rubric = {**RUBRIC, "adoption_gate": {"total_min": 70, "every_dimension_min": 5, "critical_min": 7}}
