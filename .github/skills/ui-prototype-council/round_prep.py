@@ -16,9 +16,11 @@ mapping into round.json after every sheet is in.
 
 import argparse
 import datetime
+import hashlib
 import importlib.util
 import json
 import random
+import re
 import shutil
 import string
 import sys
@@ -89,10 +91,33 @@ def contact_sheet(browser, images, target):
 
 
 def prepare(args):
-    items = dict(item.split("=", 1) for item in args.items)
+    profiles = RENDER.PROFILES.load_rubric(args.rubric) if args.rubric else None
+    try:
+        pairs = [item.split("=", 1) for item in args.items]
+        if any(len(pair) != 2 or not all(pair) for pair in pairs):
+            raise ValueError
+        items = dict(pairs)
+    except ValueError as error:
+        raise SystemExit("round-prep: each item must be NAME=FOLDER") from error
+    if len(items) != len(args.items):
+        raise SystemExit("round-prep: item names must be unique")
     for name in (args.strong, args.weak):
         if name not in items:
             raise SystemExit(f"round-prep: calibration item {name} is not listed")
+    if profiles and len(args.state) > 5:
+        raise SystemExit("round-prep: at most five state captures are allowed with a rubric")
+    for label, fragment in args.state:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", label) or not fragment.startswith("#"):
+            raise SystemExit("round-prep: state must use LABEL=#FRAGMENT with a safe label")
+    sources = {}
+    for name, folder in items.items():
+        folder = Path(folder)
+        page, design = folder / "index.html", folder / "DESIGN.md"
+        if not page.is_file() or not design.is_file():
+            raise SystemExit(f"round-prep: {folder} must contain index.html and DESIGN.md")
+        sources[name] = (page, design, hashlib.sha256(page.read_bytes()).hexdigest())
+    if not Path(args.chrome).is_file():
+        raise SystemExit(f"round-prep: Chrome not found at {args.chrome}")
     ensure_round_is_new(args.run, args.round)
     prepare_blind_directory(args.blind)
     rng = random.Random(args.seed)
@@ -102,26 +127,55 @@ def prepare(args):
     try:
         with tempfile.TemporaryDirectory() as temp:
             for ident, name in mapping.items():
-                folder = Path(items[name])
-                page = folder / "index.html"
+                page, design, _ = sources[name]
                 out = create_item_directory(args.blind, ident)
                 for theme, forced, width in VIEWS:
                     browser.load(page.resolve().as_uri(), width, theme, forced)
                     browser.screenshot(out / f"{theme}-{width}.png", full_page=True)
+                if profiles:
+                    by_width = {}
+                    for profile, width in profiles["profiles"].items():
+                        by_width.setdefault(width, []).append(profile)
+                    for width, names in by_width.items():
+                        label = "-".join(names)
+                        for theme in ("light", "dark"):
+                            browser.load(page.resolve().as_uri(), width, theme, False)
+                            browser.screenshot(
+                                out / f"profile-{label}-{theme}-{width}.png", full_page=True)
+                    if RENDER.CHECK_WIDTH not in by_width:
+                        browser.load(page.resolve().as_uri(), RENDER.CHECK_WIDTH, "light", True)
+                        browser.screenshot(
+                            out / f"high-contrast-forced-{RENDER.CHECK_WIDTH}.png", full_page=True)
+                    browser.load(page.resolve().as_uri(), profiles["reflow_width"], "light", False)
+                    browser.screenshot(
+                        out / f"reflow-zoom-{profiles['reflow_width']}.png", full_page=True)
                 shots = []
                 for theme, forced, width in SHEET:
                     browser.load(page.resolve().as_uri(), width, theme, forced)
                     path = Path(temp) / f"{ident}-{theme}-{forced}-{width}.png"
                     browser.screenshot(path)
-                    shots.append((f"{theme}{' forced colors' if forced else ''} {width}px", path))
+                    label = f"{theme}{' forced colors' if forced else ''} {width}px"
+                    if profiles and width == RENDER.REFLOW_WIDTH:
+                        label = f"{theme} {profiles['reflow_label']} {width}px"
+                    shots.append((label, path))
                 contact_sheet(browser, shots, out / "sheet.png")
-                for label, fragment in args.state:
-                    # A fragment-only change is a same-document navigation with no load
-                    # event, so leave the page first and every state loads fresh.
-                    browser.call("Page.navigate", wait_event="Page.loadEventFired", url="about:blank")
-                    browser.load(page.resolve().as_uri() + fragment, CAPTURE_STATE_WIDTH, "light", False)
-                    browser.screenshot(out / f"state-{label}.png", full_page=True)
-                shutil.copyfile(folder / "DESIGN.md", out / "DESIGN.md")
+                if profiles:
+                    for label, fragment in args.state:
+                        for width, names in by_width.items():
+                            browser.call("Page.navigate", wait_event="Page.loadEventFired",
+                                         url="about:blank")
+                            browser.load(page.resolve().as_uri() + fragment, width, "light", False)
+                            profile_label = "-".join(names)
+                            browser.screenshot(
+                                out / f"state-{label}-{profile_label}-{width}.png", full_page=True)
+                else:
+                    for label, fragment in args.state:
+                        # A fragment-only change is a same-document navigation with no load
+                        # event, so leave the page first and every state loads fresh.
+                        browser.call("Page.navigate", wait_event="Page.loadEventFired", url="about:blank")
+                        browser.load(page.resolve().as_uri() + fragment, CAPTURE_STATE_WIDTH, "light", False)
+                        browser.screenshot(out / f"state-{label}.png", full_page=True)
+                shutil.copyfile(design, out / "DESIGN.md")
             version = browser.version
     finally:
         browser.close()
@@ -132,6 +186,19 @@ def prepare(args):
             "calibration": {"strong": next(i for i, n in mapping.items() if n == args.strong),
                             "weak": next(i for i, n in mapping.items() if n == args.weak)},
             "keep": args.keep, "seed": args.seed}
+    if profiles:
+        meta["rubric_sha256"] = profiles["digest"]
+        meta["target_profiles"] = RENDER.PROFILES.metadata(profiles)
+        meta["source_sha256"] = {
+            ident: sources[name][2] for ident, name in mapping.items()
+        }
+        meta["evidence_manifest"] = {
+            f"{path.parent.name}/{path.name}": {
+                "path": str(path.resolve()),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+            for path in sorted(args.blind.glob("*/*.png"))
+        }
     (round_dir / "round.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     (args.blind / "sealed.json").write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
     # Rotations of one seeded shuffle: every reviewer sees a different order, and each
@@ -152,6 +219,13 @@ def reveal(args):
     round_file.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
+def parse_state(value):
+    label, separator, fragment = value.partition("=")
+    if not separator or not fragment.startswith("#") or not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", label):
+        raise argparse.ArgumentTypeError("state must be LABEL=#FRAGMENT with a safe label")
+    return label, fragment
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -168,12 +242,18 @@ def main(argv=None):
     prep.add_argument("--strong", required=True)
     prep.add_argument("--weak", required=True)
     prep.add_argument("--chrome", default=RENDER.DEFAULT_CHROME)
-    prep.add_argument("--state", action="append", default=[], type=lambda v: tuple(v.split("=", 1)),
+    prep.add_argument("--rubric", type=Path,
+                      help="shared JSON rubric with bounded web target profiles and optional quality checks")
+    prep.add_argument("--state", action="append", default=[], type=parse_state,
                       metavar="LABEL=#FRAGMENT",
                       help="also capture the page opened at this URL fragment, in light at 1280 pixels")
     prep.add_argument("items", nargs="+", metavar="NAME=FOLDER")
     args = parser.parse_args(argv)
-    prepare(args) if args.command == "prepare" else reveal(args)
+    try:
+        prepare(args) if args.command == "prepare" else reveal(args)
+    except (RENDER.PROFILES.RubricError, OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        print(f"round-prep: {error}", file=sys.stderr)
+        return 2
     return 0
 
 

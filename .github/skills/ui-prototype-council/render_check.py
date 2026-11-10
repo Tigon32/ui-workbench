@@ -19,6 +19,11 @@ Checks, per page:
   clicks        a scripted task needs more clicks than its budget, or does not reach its goal
   modal         a click opened a modal dialog (dialog:modal or aria-modal="true")
 
+Optional rubric checks cover visible control/name parity between ordinary light and dark
+themes, reduced-motion duration limits, named font/spacing scales, and clipping in marked
+text-expansion fixtures. They do not prove complete accessibility, motion compliance,
+theme equivalence, or interaction completeness.
+
 Limits, stated rather than hidden: contrast is skipped for text over a background image
 and under forced colors, where the user agent owns colour. Captures are not
 version-pinned; the browser version is printed so a round can record it.
@@ -26,6 +31,9 @@ version-pinned; the browser version is printed so a round can record it.
 
 import argparse
 import base64
+import collections
+import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -37,6 +45,11 @@ import tempfile
 import time
 import urllib.request
 from pathlib import Path
+
+PROFILE_SPEC = importlib.util.spec_from_file_location(
+    "render_profiles", Path(__file__).with_name("profiles.py"))
+PROFILES = importlib.util.module_from_spec(PROFILE_SPEC)
+PROFILE_SPEC.loader.exec_module(PROFILES)
 
 DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 THEMES = {
@@ -179,7 +192,9 @@ AUDIT = r"""
     if (literal.test(el.getAttribute("style").replace(/--[\w-]+\s*:[^;]+;?/g, ""))) add("literal", el, "inline style colour");
   }
   for (const sel of hover) {
-    if (!focusSel.has(sel.replace(":hover", ":focus-visible")) && !focusSel.has(sel.replace(":hover", ":focus-within")))
+    if (!opts.ignoreHoverOnly &&
+        !focusSel.has(sel.replace(":hover", ":focus-visible")) &&
+        !focusSel.has(sel.replace(":hover", ":focus-within")))
       add("hover-only", null, `${sel} has no :focus-visible or :focus-within counterpart`);
   }
 
@@ -206,6 +221,191 @@ AUDIT = r"""
 })
 """
 
+QUALITY_AUDIT = r"""
+(async (opts) => {
+  const found = [], unknown = [];
+  const visible = (el) => {
+    const s = getComputedStyle(el), r = el.getBoundingClientRect();
+    return s.display !== "none" && s.visibility !== "hidden" && Number(s.opacity) > 0 &&
+      r.width > 1 && r.height > 1;
+  };
+  const role = (el) => {
+    if (el.getAttribute("role")) return el.getAttribute("role");
+    return ({BUTTON: "button", A: "link", SELECT: "combobox", TEXTAREA: "textbox",
+      INPUT: ({button:"button",checkbox:"checkbox",radio:"radio",submit:"button",reset:"button"})[
+        (el.type || "").toLowerCase()] || "textbox", SUMMARY: "button"})[el.tagName] || "control";
+  };
+  const name = (el) => {
+    const labelledBy = (el.getAttribute("aria-labelledby") || "").split(/\s+/)
+      .filter(Boolean).map(id => document.getElementById(id)?.innerText || "")
+      .join(" ").replace(/\s+/g, " ").trim();
+    const labelled = labelledBy || el.getAttribute("aria-label") ||
+      (el.labels && [...el.labels].map(label => label.innerText).join(" ")) ||
+      el.innerText || el.value || el.getAttribute("title") || "";
+    return labelled.replace(/\s+/g, " ").trim().toLowerCase();
+  };
+  let controls = null;
+  if (opts.semantic_control_parity) {
+    controls = [...document.querySelectorAll(
+      'a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex="-1"]),'
+      + '[role=button],[role=link],[role=tab],[role=radio],[role=checkbox],[role=switch],'
+      + '[role=menuitem],[role=option],[role=combobox],[role=textbox]'
+    )].filter(visible).map(el =>
+      `${role(el)}\u0000${name(el) || "[unnamed]"}\u0000` +
+      `${el.disabled ? "disabled" : "enabled"}\u0000` +
+      `${el.getAttribute("aria-disabled") === "true" ? "aria-disabled" : "aria-enabled"}`).sort();
+    if (!controls.length) unknown.push("no visible controls to compare");
+  }
+  if (opts.reduced_motion_max_ms != null) {
+    const time = (value) => value.endsWith("ms") ? parseFloat(value) :
+      value.endsWith("s") ? parseFloat(value) * 1000 : 0;
+    let inspected = 0;
+    for (const el of document.querySelectorAll("*")) {
+      if (el.hasAttribute("data-motion-essential")) continue;
+      inspected++;
+      const style = getComputedStyle(el);
+      for (const [kind, durations, delays] of [
+        ["animation", style.animationDuration, style.animationDelay],
+        ["transition", style.transitionDuration, style.transitionDelay]
+      ]) {
+        const ds = durations.split(",").map(time), ls = delays.split(",").map(time);
+        const total = Math.max(0, ...ds.map((d, i) => d + (ls[i % ls.length] || 0)));
+        if (total > opts.reduced_motion_max_ms)
+          found.push({check: "reduced-motion-duration", where: el.tagName.toLowerCase(),
+            detail: `${kind} ${total.toFixed(0)}ms > declared ${opts.reduced_motion_max_ms}ms`});
+      }
+    }
+    if (!inspected) unknown.push("page has no elements to inspect for reduced-motion duration");
+  }
+  const scales = [
+    ["typography_scale_px", "--font-size-", "font-size-token-scale"],
+    ["spacing_scale_px", "--space-", "spacing-token-scale"]
+  ];
+  for (const [key, prefix, check] of scales) {
+    if (!opts[key]) continue;
+    let count = 0;
+    for (const sheet of document.styleSheets) {
+      try {
+        const walk = rules => { for (const rule of rules) {
+          if (rule.style) for (const prop of rule.style) {
+            if (!prop.startsWith(prefix)) continue;
+            count++;
+            const value = rule.style.getPropertyValue(prop).trim().match(/^(\d+(?:\.\d+)?)px$/);
+            if (!value || !opts[key].some(n => Math.abs(Number(value[1]) - n) < 0.01))
+              found.push({check, where: prop, detail:
+                `${rule.style.getPropertyValue(prop).trim()} is outside declared scale`});
+          }
+          if (rule.cssRules) walk(rule.cssRules);
+        }};
+        walk(sheet.cssRules);
+      } catch (_) { unknown.push(`${key}: a stylesheet is not inspectable`); }
+    }
+    if (!count) unknown.push(`${key}: no ${prefix} custom properties were found`);
+  }
+  if (opts.spacing_scale_px) {
+    const spacingProps = new Map([
+      ["margin", ["marginTop", "marginRight", "marginBottom", "marginLeft"]],
+      ["margin-top", ["marginTop"]], ["margin-right", ["marginRight"]],
+      ["margin-bottom", ["marginBottom"]], ["margin-left", ["marginLeft"]],
+      ["margin-block", ["marginBlockStart", "marginBlockEnd"]],
+      ["margin-block-start", ["marginBlockStart"]], ["margin-block-end", ["marginBlockEnd"]],
+      ["margin-inline", ["marginInlineStart", "marginInlineEnd"]],
+      ["margin-inline-start", ["marginInlineStart"]], ["margin-inline-end", ["marginInlineEnd"]],
+      ["padding", ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"]],
+      ["padding-top", ["paddingTop"]], ["padding-right", ["paddingRight"]],
+      ["padding-bottom", ["paddingBottom"]], ["padding-left", ["paddingLeft"]],
+      ["padding-block", ["paddingBlockStart", "paddingBlockEnd"]],
+      ["padding-block-start", ["paddingBlockStart"]], ["padding-block-end", ["paddingBlockEnd"]],
+      ["padding-inline", ["paddingInlineStart", "paddingInlineEnd"]],
+      ["padding-inline-start", ["paddingInlineStart"]], ["padding-inline-end", ["paddingInlineEnd"]],
+      ["gap", ["rowGap", "columnGap"]], ["row-gap", ["rowGap"]], ["column-gap", ["columnGap"]]
+    ]);
+    const candidates = new Map();
+    const mark = (el, declaration) => {
+      for (const property of spacingProps.get(declaration) || []) {
+        if (!candidates.has(el)) candidates.set(el, new Set());
+        candidates.get(el).add(property);
+      }
+    };
+    const walkSpacing = rules => { for (const rule of rules) {
+      if (rule.conditionText && rule.constructor.name === "CSSMediaRule" &&
+          !matchMedia(rule.conditionText).matches) continue;
+      if (rule.conditionText && rule.constructor.name === "CSSSupportsRule" &&
+          !CSS.supports(rule.conditionText)) continue;
+      if (rule.style && rule.selectorText) {
+        const declarations = [...rule.style].filter(prop => spacingProps.has(prop));
+        if (declarations.length) {
+          try {
+            for (const el of document.querySelectorAll(rule.selectorText))
+              if (visible(el)) for (const prop of declarations) mark(el, prop);
+          } catch (_) { unknown.push("spacing scale: a selector could not be inspected"); }
+        }
+      }
+      if (rule.cssRules) walkSpacing(rule.cssRules);
+    }};
+    for (const sheet of document.styleSheets) {
+      try { walkSpacing(sheet.cssRules); }
+      catch (_) { unknown.push("spacing scale: a stylesheet is not inspectable"); }
+    }
+    for (const el of document.querySelectorAll("[style]")) {
+      if (!visible(el)) continue;
+      for (const declaration of spacingProps.keys())
+        if (el.style.getPropertyValue(declaration)) mark(el, declaration);
+    }
+    let inspectedSpacing = 0;
+    for (const [el, properties] of candidates) for (const property of properties) {
+      inspectedSpacing++;
+      const cssProperty = property.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`);
+      const computed = el.computedStyleMap().get(cssProperty)?.toString();
+      if (computed === "auto" || computed === "normal") continue;
+      const value = getComputedStyle(el)[property].trim().toLowerCase();
+      if (value === "auto" || value === "normal" || value === "0" || value === "0px") continue;
+      const pixels = value.match(/^(-?\d+(?:\.\d+)?)px$/);
+      if (!pixels || !opts.spacing_scale_px.some(n => Math.abs(Number(pixels[1]) - n) < 0.01))
+        found.push({check: "spacing-scale", where: el.tagName.toLowerCase(),
+          detail: `${property}: ${value} is outside declared spacing scale`});
+    }
+    if (!inspectedSpacing)
+      unknown.push("spacing scale: no visible author-declared margin, padding, or gap properties were found");
+  }
+  if (opts.typography_scale_px) {
+    const seen = new Set();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      const el = text.parentElement;
+      if (!el || seen.has(el) || !text.textContent.trim() || !visible(el)) continue;
+      seen.add(el);
+      const size = parseFloat(getComputedStyle(el).fontSize);
+      if (!opts.typography_scale_px.some(n => Math.abs(n - size) < 0.1))
+        found.push({check: "typography-scale", where: el.tagName.toLowerCase(),
+          detail: `${size.toFixed(1)}px is outside declared typography scale`});
+    }
+    if (!seen.size) unknown.push("typography scale: no visible text was found");
+  }
+  if (opts.text_expansion_factor != null) {
+    const roots = [...document.querySelectorAll("[data-text-expansion]")];
+    if (!roots.length) unknown.push("text expansion: no [data-text-expansion] fixture was found");
+    else {
+      const targets = new Set(roots.flatMap(root => [root, ...root.querySelectorAll("*")]));
+      for (const el of targets) {
+        if (!el.textContent.trim()) continue;
+        const size = parseFloat(getComputedStyle(el).fontSize);
+        el.style.setProperty("font-size", `${size * opts.text_expansion_factor}px`, "important");
+      }
+      for (const el of targets) {
+        if (!el.textContent.trim()) continue;
+        const style = getComputedStyle(el);
+        const clippedX = ["hidden", "clip"].includes(style.overflowX) && el.scrollWidth > el.clientWidth + 1;
+        const clippedY = ["hidden", "clip"].includes(style.overflowY) && el.scrollHeight > el.clientHeight + 1;
+        if (clippedX || clippedY)
+          found.push({check: "text-expansion-clipping", where: el.tagName.toLowerCase(),
+            detail: `text clips after ${opts.text_expansion_factor}x expansion`});
+      }
+    }
+  }
+  return {findings: found, unknown, controls};
+})
+"""
 
 TASK_STEP = r"""
 (async (label) => {
@@ -232,13 +432,13 @@ TASK_STEP = r"""
 """
 
 
-def run_tasks(browser, page, tasks):
+def run_tasks(browser, page, tasks, width=CHECK_WIDTH):
     """Run each scripted task from a fresh load and count its clicks against the budget."""
     found, counts = [], []
     url = page.resolve().as_uri()
     for task in tasks:
         browser.call("Page.navigate", wait_event="Page.loadEventFired", url="about:blank")
-        browser.load(url + task.get("start", ""), CHECK_WIDTH, "light", False)
+        browser.load(url + task.get("start", ""), width, "light", False)
         clicks, failed = 0, False
         for label in task["clicks"]:
             result = browser.evaluate(f"{TASK_STEP}({json.dumps(label)})")
@@ -260,7 +460,7 @@ def run_tasks(browser, page, tasks):
                               "detail": f"{clicks} clicks > budget {task['max_clicks']}"})
         counts.append((task["name"], clicks, task["max_clicks"]))
     for item in found:
-        item["config"] = f"light {CHECK_WIDTH}"
+        item["config"] = f"light {width}"
     return found, counts
 
 
@@ -366,11 +566,13 @@ class Browser:
                 seen_event = True
         return result
 
-    def load(self, url, width, theme, forced):
+    def load(self, url, width, theme, forced, reduced_motion=False):
         self.call("Emulation.setDeviceMetricsOverride", width=width, height=HEIGHT,
                   deviceScaleFactor=1, mobile=False)
         features = [{"name": n, "value": v} for n, v in THEMES[theme]]
         features.append({"name": "forced-colors", "value": "active" if forced else "none"})
+        if reduced_motion:
+            features.append({"name": "prefers-reduced-motion", "value": "reduce"})
         self.call("Emulation.setEmulatedMedia", features=features)
         self.call("Page.navigate", wait_event="Page.loadEventFired", url=url)
 
@@ -391,6 +593,8 @@ class Browser:
         Path(path).write_bytes(base64.b64decode(data))
 
     def close(self):
+        if getattr(self, "ws", None):
+            self.ws.sock.close()
         if getattr(self, "process", None) and self.process.poll() is None:
             self.process.terminate()
             try:
@@ -432,6 +636,98 @@ def check_page(browser, page, expect, forbid=(), budget=0):
     return unique
 
 
+def check_page_profiles(browser, page, expect, forbid, budget, profiles):
+    """Run bounded viewport checks and declared quality checks for target profiles."""
+    url = page.resolve().as_uri()
+    found, unknown = [], []
+    if CHECK_WIDTH not in profiles["widths"]:
+        baseline = check_page(browser, page, expect, forbid, budget)
+        found.extend(item for item in baseline if item["check"] not in ("hover-only", "reflow"))
+    for width in profiles["widths"]:
+        for theme in THEMES:
+            for forced in (False, True):
+                browser.load(url, width, theme, forced)
+                browser.call("Input.dispatchKeyEvent", type="keyDown", key="Tab", code="Tab",
+                             windowsVirtualKeyCode=9)
+                browser.call("Input.dispatchKeyEvent", type="keyUp", key="Tab", code="Tab",
+                             windowsVirtualKeyCode=9)
+                options = json.dumps({
+                    "mode": "full", "forced": forced, "expect": expect,
+                    "forbid": list(forbid),
+                    "budget": budget if (theme, forced, width) == ("light", False, CHECK_WIDTH) else 0,
+                    "ignoreHoverOnly": True,
+                })
+                for item in browser.evaluate(f"{AUDIT}({options})"):
+                    item["config"] = f"{theme}{' forced' if forced else ''} {width}"
+                    found.append(item)
+
+    browser.load(url, REFLOW_WIDTH, "light", False)
+    for item in browser.evaluate(f"{AUDIT}({json.dumps({'mode': 'reflow'})})"):
+        item["config"] = "zoom/reflow (not phone) 320"
+        found.append(item)
+
+    quality = profiles["quality_checks"]
+    for width in profiles["widths"]:
+        if quality.get("semantic_control_parity"):
+            observed = {}
+            for theme in ("light", "dark"):
+                browser.load(url, width, theme, False)
+                result = browser.evaluate(
+                    f"{QUALITY_AUDIT}({json.dumps({'semantic_control_parity': True})})")
+                observed[theme] = result["controls"] or []
+                if result["unknown"]:
+                    unknown.append(f"{theme} {width}: {result['unknown'][0]}")
+            if observed["light"] != observed["dark"] and (observed["light"] or observed["dark"]):
+                missing_dark = list((collections.Counter(observed["light"]) -
+                                     collections.Counter(observed["dark"])).elements())
+                missing_light = list((collections.Counter(observed["dark"]) -
+                                      collections.Counter(observed["light"])).elements())
+                found.append({
+                    "check": "semantic-control-parity",
+                    "where": "page",
+                    "detail": f"light-only {missing_dark}; dark-only {missing_light}",
+                    "config": f"light/dark {width}",
+                })
+
+        for theme in ("light", "dark"):
+            browser.load(url, width, theme, False)
+            opts = {
+                "semantic_control_parity": False,
+                "reduced_motion_max_ms": None,
+                "typography_scale_px": quality.get("typography_scale_px"),
+                "spacing_scale_px": quality.get("spacing_scale_px"),
+                "text_expansion_factor": quality.get("text_expansion_factor"),
+            }
+            if opts["typography_scale_px"] or opts["spacing_scale_px"] or \
+                    opts["text_expansion_factor"] is not None:
+                result = browser.evaluate(f"{QUALITY_AUDIT}({json.dumps(opts)})")
+                for item in result["findings"]:
+                    item["config"] = f"{theme} {width}"
+                    found.append(item)
+                unknown.extend(f"{theme} {width}: {item}" for item in result["unknown"])
+
+        if "reduced_motion_max_ms" in quality:
+            browser.load(url, width, "light", False, reduced_motion=True)
+            motion_opts = {
+                'semantic_control_parity': False,
+                'reduced_motion_max_ms': quality['reduced_motion_max_ms'],
+                'text_expansion_factor': None,
+            }
+            result = browser.evaluate(f"{QUALITY_AUDIT}({json.dumps(motion_opts)})")
+            for item in result["findings"]:
+                item["config"] = f"reduced motion {width}"
+                found.append(item)
+            unknown.extend(f"reduced motion {width}: {item}" for item in result["unknown"])
+
+    unique, seen = [], set()
+    for item in found:
+        key = (item["check"], item["where"], item["detail"], item["config"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique, list(dict.fromkeys(unknown))
+
+
 def capture_page(browser, page, folder):
     folder.mkdir(parents=True, exist_ok=True)
     for theme in THEMES:
@@ -444,6 +740,24 @@ def capture_page(browser, page, folder):
                 browser.screenshot(folder / name)
 
 
+def capture_page_profiles(browser, page, folder, profiles):
+    """Capture each unique target width and theme plus a separately labeled reflow view."""
+    folder.mkdir(parents=True, exist_ok=True)
+    by_width = {}
+    for name, width in profiles["profiles"].items():
+        by_width.setdefault(width, []).append(name)
+    for width, names in by_width.items():
+        label = "-".join(names)
+        for theme in THEMES:
+            browser.load(page.resolve().as_uri(), width, theme, False)
+            browser.screenshot(folder / f"profile-{label}-{theme}-{width}.png")
+    if CHECK_WIDTH not in by_width:
+        browser.load(page.resolve().as_uri(), CHECK_WIDTH, "light", True)
+        browser.screenshot(folder / f"high-contrast-forced-{CHECK_WIDTH}.png")
+    browser.load(page.resolve().as_uri(), profiles["reflow_width"], "light", False)
+    browser.screenshot(folder / f"reflow-zoom-{profiles['reflow_width']}.png")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("pages", nargs="+", type=Path)
@@ -452,45 +766,74 @@ def main(argv=None):
     parser.add_argument("--forbid", type=Path, help="JSON list of case-insensitive patterns that must not render")
     parser.add_argument("--tasks", type=Path,
                         help="JSON list of {name, clicks: [visible labels], goal, max_clicks, optional start: '#fragment'}")
+    parser.add_argument("--rubric", type=Path,
+                        help="shared JSON rubric with bounded web target profiles and optional quality checks")
     parser.add_argument("--max-words", type=int, default=0,
                         help="visible-word budget for the first 1280 by 900 viewport; 0 disables it")
     parser.add_argument("--chrome", default=os.environ.get("CHROME", DEFAULT_CHROME))
     args = parser.parse_args(argv)
+    try:
+        profiles = PROFILES.load_rubric(args.rubric) if args.rubric else None
+        expect = json.loads(args.expect.read_text(encoding="utf-8")) if args.expect else []
+        forbid = json.loads(args.forbid.read_text(encoding="utf-8")) if args.forbid else []
+        tasks = json.loads(args.tasks.read_text(encoding="utf-8")) if args.tasks else []
+    except (PROFILES.RubricError, OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        print(f"render-check: {error}", file=sys.stderr)
+        return 2
+    for path in args.pages:
+        if not path.is_file():
+            print(f"render-check: {path}: not a file", file=sys.stderr)
+            return 2
     if not Path(args.chrome).exists():
         print(f"render-check: Chrome not found at {args.chrome}; refusing rather than skipping",
               file=sys.stderr)
         return 2
-    expect = json.loads(args.expect.read_text(encoding="utf-8")) if args.expect else []
-    forbid = json.loads(args.forbid.read_text(encoding="utf-8")) if args.forbid else []
-    tasks = json.loads(args.tasks.read_text(encoding="utf-8")) if args.tasks else []
     started = time.monotonic()
     browser = Browser(args.chrome)
     failed = False
+    incomplete = False
     try:
         print(f"render-check: {browser.version}")
+        if profiles:
+            print(f"render-check: rubric sha256 {profiles['digest']}")
+            print(f"render-check: target decision: {profiles['decision']}")
+            print(f"render-check: target profiles: {profiles['profiles']}")
+            print("render-check: 320px is zoom/reflow, not a phone profile")
         for page in args.pages:
-            if not page.is_file():
-                print(f"render-check: {page}: not a file", file=sys.stderr)
-                return 2
-            problems = check_page(browser, page, expect, forbid, args.max_words)
+            unknown = []
+            if profiles:
+                problems, unknown = check_page_profiles(
+                    browser, page, expect, forbid, args.max_words, profiles)
+                for item in unknown:
+                    print(f"{page}: quality unknown: {item}")
+                incomplete = incomplete or bool(unknown)
+            else:
+                problems = check_page(browser, page, expect, forbid, args.max_words)
             if tasks:
-                task_problems, counts = run_tasks(browser, page, tasks)
-                problems += task_problems
-                for name, clicks, budget in counts:
-                    print(f"{page}: clicks: {name}: {clicks} (budget {budget})")
+                task_widths = profiles["widths"] if profiles else [CHECK_WIDTH]
+                for width in task_widths:
+                    task_problems, counts = run_tasks(browser, page, tasks, width)
+                    problems += task_problems
+                    for name, clicks, budget in counts:
+                        suffix = f" [{width}px]" if profiles else ""
+                        print(f"{page}: clicks: {name}: {clicks} (budget {budget}){suffix}")
             for item in problems:
                 print(f"{page}: {item['check']}: {item['where']}: {item['detail']} [{item['config']}]")
-            print(f"{page}: {'FAIL' if problems else 'ok'} ({len(problems)} finding(s))")
+            status = "FAIL" if problems else "INCOMPLETE" if unknown else "ok"
+            print(f"{page}: {status} ({len(problems)} finding(s))")
             failed = failed or bool(problems)
             if args.capture:
-                capture_page(browser, page, args.capture / page.parent.name)
+                if profiles:
+                    capture_page_profiles(browser, page, args.capture / page.parent.name, profiles)
+                else:
+                    capture_page(browser, page, args.capture / page.parent.name)
     except CdpError as error:
         print(f"render-check: {error}", file=sys.stderr)
         return 2
     finally:
         browser.close()
     print(f"render-check: {time.monotonic() - started:.2f}s")
-    return 1 if failed else 0
+    return 1 if failed else 3 if incomplete else 0
 
 
 if __name__ == "__main__":

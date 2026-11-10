@@ -15,6 +15,23 @@ Use the review skill when requirements or constraints are not settled. Use the
 prototype council only when the brief, fixture and rubric are ready. Neither
 skill builds the product interface.
 
+## Design quality and adoption
+
+Start new runs from
+[`rubric-default.json`](.github/skills/ui-prototype-council/rubric-default.json).
+It covers 23 explicit dimensions, with anchors, groups, weights and critical
+floors. Review its target platforms and thresholds before scoring.
+Justify each omitted default dimension.
+
+Version 3 reports category scores, group subtotals and an expert-design total
+out of 100. Its adoption verdict is separate from the relative winner.
+Missing required evidence and critical failures cannot disappear inside an average.
+Generator self-assessment does not count as a council vote.
+
+The [quality contract](docs/design-quality-contract.md) records the bounded
+council, coverage map, scoring formula, evidence rules and limitations.
+The total is expert judgment, not human usability or accessibility certification.
+
 ## Checks
 
 The prototype tools use Python's standard library. Run their tests with:

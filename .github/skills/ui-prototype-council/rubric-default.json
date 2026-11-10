@@ -1,0 +1,130 @@
+{
+  "rules_version": 3,
+  "catalogue_version": 1,
+  "renderer": "web",
+  "calibration_margin": 2,
+  "caps": {"max_rounds": 3, "max_reviewers": 3, "max_prototypes": 4},
+  "target_platforms": {"mobile": false, "tablet": false, "laptop": true, "desktop": true, "wide": true},
+  "target_platform_decision": "This starting profile targets desktop browser prototypes. Review the intended devices before each run. The separate 320 CSS pixel reflow check still applies.",
+  "quality_checks": {"semantic_control_parity": true},
+  "quality_check_decision": "Semantic control parity is enabled. Declare project-specific token scales, text-expansion fixtures and reduced-motion limits before enabling those checks. Static captures do not establish runtime performance.",
+  "adoption_decision": "No adoption thresholds are supplied. The project must declare adoption_gate and record its threshold decision before adoption. Review the catalogue floors before scoring; they are starting design goals, not validated usability or compliance thresholds.",
+  "excluded_dimensions": [],
+  "dimensions": [
+    {
+      "id": "typography", "title": "Typography and readability", "group": "visual", "weight": 5, "floor": 5, "critical": false,
+      "scope": "Type roles, readable emphasis and line composition. Text meaning belongs to content; overflow belongs to text_resilience.",
+      "anchors": {"3": "Type roles compete, reading is tiring, or emphasis obscures important information.", "5": "Text is readable but the scale or emphasis is uneven.", "7": "A coherent scale supports comfortable reading and clear text roles.", "9": "Type remains clear and deliberate across dense, sparse and difficult evidence states."}
+    },
+    {
+      "id": "hierarchy", "title": "Visual hierarchy", "group": "visual", "weight": 5, "floor": 5, "critical": false,
+      "scope": "Attention order and prominence. Alignment belongs to layout; the main message belongs to clarity.",
+      "anchors": {"3": "Secondary elements dominate or important information is visually buried.", "5": "The intended attention order is visible but competing accents interrupt it.", "7": "Importance and visual emphasis agree throughout the main flow.", "9": "Attention follows the intended decision order even in difficult states without excessive emphasis."}
+    },
+    {
+      "id": "spacing_density", "title": "Spacing and density", "group": "visual", "weight": 3, "floor": 5, "critical": false,
+      "scope": "Rhythm, grouping and useful density. Grid alignment belongs to layout.",
+      "anchors": {"3": "Crowding or wasted space makes related information difficult to compare.", "5": "Grouping is understandable but rhythm or density is uneven.", "7": "Spacing separates concepts and supports the declared working density.", "9": "Dense and sparse states retain an intentional rhythm without wasted space or lost grouping."}
+    },
+    {
+      "id": "color", "title": "Color meaning", "group": "visual", "weight": 4, "floor": 5, "critical": false,
+      "scope": "Semantic color roles and emphasis. Measured contrast and color-only information are mechanical gates, not this score.",
+      "anchors": {"3": "Color roles conflict or imply unsupported status or importance.", "5": "Roles are mostly understandable but accents are inconsistent or distracting.", "7": "Color has restrained, consistent roles that reinforce the content.", "9": "Color remains purposeful across complex states without creating unintended rankings or meanings."}
+    },
+    {
+      "id": "iconography", "title": "Iconography and imagery", "group": "visual", "weight": 3, "floor": 5, "critical": false,
+      "scope": "Meaning, optical coherence and useful imagery. Accessible names and touch targets are separate gates.",
+      "anchors": {"3": "Icons are ambiguous, mismatched or decorative distractions near important actions.", "5": "Most icons are understandable but weight or meaning is inconsistent.", "7": "Icons have coherent geometry and reinforce recognizable actions or concepts.", "9": "Icons and imagery add useful recognition while remaining coherent in every declared context."}
+    },
+    {
+      "id": "consistency", "title": "Consistency", "group": "visual", "weight": 4, "floor": 5, "critical": false,
+      "scope": "Equivalent concepts use equivalent patterns across screens and states. Rendering defects belong to craft.",
+      "anchors": {"3": "Equivalent actions or concepts change presentation or behavior without explanation.", "5": "Core patterns repeat but important exceptions remain.", "7": "Equivalent concepts share predictable patterns with justified exceptions.", "9": "Cross-screen and state patterns remain coherent even in unusual or expanded workflows."}
+    },
+    {
+      "id": "craft", "title": "Craft and finish", "group": "visual", "weight": 4, "floor": 5, "critical": false,
+      "scope": "Execution details, deliberate platform expression and rendering finish. Do not rescore consistency or contrast.",
+      "anchors": {"3": "Visible rough edges, accidental alignment or unfinished details interrupt the experience.", "5": "The interface is serviceable but execution details remain uneven.", "7": "Details look deliberate and fit the declared platform conventions.", "9": "The interface sustains careful finish across primary, secondary and difficult states without decorative excess."}
+    },
+    {
+      "id": "clarity", "title": "Purpose and next-step clarity", "group": "ux", "weight": 5, "floor": 5, "critical": false,
+      "scope": "Whether the screen communicates its purpose and available next step. Navigation structure belongs to wayfinding.",
+      "anchors": {"3": "The screen's purpose or available next step is unclear.", "5": "The purpose is understandable after interpretation or exploration.", "7": "The purpose and next step are evident without unnecessary explanation.", "9": "Purpose and next steps remain obvious as context changes, without hiding needed qualifications."}
+    },
+    {
+      "id": "interaction_states", "title": "Interaction states and affordances", "group": "hybrid", "weight": 5, "floor": 5, "critical": false,
+      "scope": "Discoverable controls and understandable enabled, selected, focused and pending states. State feedback belongs to feedback.",
+      "anchors": {"3": "Controls look inert, unavailable actions look available, or selection is ambiguous.", "5": "Primary controls are understandable but secondary states are inconsistent.", "7": "Controls and their states communicate available actions and current selection.", "9": "All declared control states remain clear through pointer and keyboard paths without unnecessary styling differences."}
+    },
+    {
+      "id": "theme_parity", "title": "Theme parity", "group": "hybrid", "weight": 4, "floor": 5, "critical": false,
+      "scope": "Equivalent information, tasks and emphasis across declared themes, not identical pixels. Contrast stays mechanical.",
+      "anchors": {"3": "A declared theme loses content, actions or meaningful emphasis.", "5": "Tasks remain possible but one theme has noticeably weaker hierarchy or finish.", "7": "Declared themes preserve information and task quality with coherent emphasis.", "9": "Each theme feels deliberately designed while preserving equivalent semantics and interaction quality."}
+    },
+    {
+      "id": "accessibility", "title": "Inclusive interaction", "group": "hybrid", "weight": 8, "floor": 7, "critical": true,
+      "scope": "Evidence-backed comprehensibility and inclusive task paths beyond deterministic checks. Screenshots cannot establish screen-reader or native behavior.",
+      "anchors": {"3": "The evidence shows an exclusionary task path or essential information that some supported users cannot obtain.", "5": "Core paths are understandable but inclusive alternatives or explanations need improvement.", "7": "Supported input and assistive paths preserve task meaning in the supplied evidence.", "9": "Difficult task states remain understandable across the supported inclusive paths, with no critical unresolved barrier."}
+    },
+    {
+      "id": "responsive_behavior", "title": "Responsive behavior", "group": "hybrid", "weight": 5, "floor": 5, "critical": false,
+      "scope": "Adaptation quality at declared viewport targets and web zoom. Native window resizing requires separate native evidence.",
+      "anchors": {"3": "Important information or actions become unusable at a declared size.", "5": "Content fits but adaptation produces awkward hierarchy, navigation or density.", "7": "Declared sizes preserve usable structure, context and action access.", "9": "Small and large declared sizes each use available space deliberately without weakening task quality."}
+    },
+    {
+      "id": "motion", "title": "Motion and reduced motion", "group": "hybrid", "weight": 2, "floor": 5, "critical": false,
+      "scope": "Purpose and continuity of motion, or deliberate static feedback. Preference and duration checks remain mechanical.",
+      "anchors": {"3": "Motion distracts, obscures context or delays control without useful meaning.", "5": "Motion or static transitions work but provide uneven continuity or feedback.", "7": "Motion or deliberate static feedback clarifies change without delaying the task.", "9": "Transitions communicate change precisely and retain meaning in the evidenced reduced-motion alternative."}
+    },
+    {
+      "id": "job_completion", "title": "Task flow and efficiency", "group": "ux", "weight": 8, "floor": 7, "critical": true,
+      "scope": "Demonstrated prototype task paths, click budgets, keyboard actions and progressive disclosure. This is not human task-success measurement.",
+      "anchors": {"3": "The core path is blocked or lacks a useful, understandable outcome.", "5": "The path reaches an outcome but includes avoidable steps or unnecessary repeated choices.", "7": "The declared path reaches the intended outcome with deliberate interaction effort.", "9": "Primary and difficult task paths remain short and understandable without removing consent or needed evidence."}
+    },
+    {
+      "id": "truthful_state", "title": "Truthful state and provenance", "group": "ux", "weight": 8, "floor": 7, "critical": true,
+      "scope": "Known, unknown, stale and proposed information; source, scope, privacy and consent explanations. Visualization encoding belongs to data_display.",
+      "anchors": {"3": "The design implies unsupported certainty, successful work or authority.", "5": "Qualifiers exist but important scope, uncertainty or consent boundaries are easy to miss.", "7": "State, source, limitations and authority are explicit where decisions depend on them.", "9": "Difficult partial, stale and denied states remain truthful without overwhelming the main decision."}
+    },
+    {
+      "id": "wayfinding", "title": "Information architecture and wayfinding", "group": "ux", "weight": 4, "floor": 5, "critical": false,
+      "scope": "Location, navigation, return paths, context and discoverability of supporting help.",
+      "anchors": {"3": "Users can lose location or cannot find a necessary destination or return path.", "5": "Main destinations are reachable but context or return paths are weak.", "7": "Location, destinations and return paths remain understandable through the main flow.", "9": "Deep and interrupted flows retain context and make relevant destinations and help easy to find."}
+    },
+    {
+      "id": "feedback", "title": "Feedback and state coverage", "group": "ux", "weight": 4, "floor": 5, "critical": false,
+      "scope": "First run, empty, loading, progress, partial, denied, offline, stale and error states; perceived responsiveness. Static captures cannot establish latency.",
+      "anchors": {"3": "Important work or failures have no understandable feedback.", "5": "Common states have feedback but difficult states lack a useful explanation or next step.", "7": "Declared states communicate what happened, what remains and available next steps.", "9": "Difficult and interrupted states preserve context with timely evidenced feedback and no misleading completion."}
+    },
+    {
+      "id": "error_recovery", "title": "Error prevention and recovery", "group": "ux", "weight": 5, "floor": 7, "critical": true,
+      "scope": "Safe defaults, validation, cancellation, recovery, reversibility and exact consent for consequential choices.",
+      "anchors": {"3": "A predictable mistake can cause an unclear consequence or offers no reasonable recovery.", "5": "Common mistakes are addressed but cancellation, consent or recovery paths remain unclear.", "7": "Consequential choices explain their scope and provide appropriate prevention, cancellation and recovery.", "9": "Difficult failure and interruption paths preserve user control without unnecessary confirmations."}
+    },
+    {
+      "id": "content", "title": "Content and microcopy", "group": "ux", "weight": 3, "floor": 5, "critical": false,
+      "scope": "Specific labels, consistent terminology, instructions and actionable error text. Overall screen purpose belongs to clarity.",
+      "anchors": {"3": "Vague, conflicting or misleading wording obstructs decisions.", "5": "Wording is understandable but includes avoidable jargon, repetition or weak instructions.", "7": "Labels and explanations are concise, specific and consistent.", "9": "Difficult states remain precisely explained with enough detail to act and no unnecessary text."}
+    },
+    {
+      "id": "layout", "title": "Layout and composition", "group": "visual", "weight": 3, "floor": 5, "critical": false,
+      "scope": "Grid, alignment, proportion and component relationships. Whitespace rhythm belongs to spacing_density.",
+      "anchors": {"3": "Accidental alignment or proportions make relationships difficult to understand.", "5": "The main structure works but composition is uneven.", "7": "Alignment and proportions make component relationships deliberate and legible.", "9": "Composition remains deliberate across dense, sparse and expanded states."}
+    },
+    {
+      "id": "data_display", "title": "Data presentation", "group": "visual", "weight": 3, "floor": 5, "critical": false,
+      "scope": "Tables, diagrams, comparisons, named metrics and visual encoding. Source certainty belongs to truthful_state.",
+      "anchors": {"3": "Data encoding hides meaningful differences or encourages incorrect comparisons.", "5": "Data is readable but comparisons or explanations require unnecessary effort.", "7": "Encoding and labels support the comparisons required by the task.", "9": "Complex comparisons remain precise and understandable without false precision or unnecessary decoration."}
+    },
+    {
+      "id": "visual_character", "title": "Brief-specific visual character", "group": "visual", "weight": 1, "floor": 5, "critical": false,
+      "scope": "Deliberate expression of the brief. Do not reward novelty, imitate a reference, or penalize familiar native conventions.",
+      "anchors": {"3": "Styling conflicts with the brief or feels accidental.", "5": "The styling is suitable but its choices are weakly connected to the brief.", "7": "Visual choices form a deliberate expression of the brief and platform.", "9": "A coherent identity supports the task without novelty, decoration or generic motifs displacing clarity."}
+    },
+    {
+      "id": "text_resilience", "title": "Text and data resilience", "group": "hybrid", "weight": 4, "floor": 5, "critical": false,
+      "scope": "Long names, large sets, wrapping, truncation, text enlargement and supported localization or right-to-left layouts. Synthetic expansion is not translation testing.",
+      "anchors": {"3": "Realistic difficult text or data makes essential information or actions unusable.", "5": "Common cases work but expansion, truncation or large sets weaken task comprehension.", "7": "Declared difficult text and data remain understandable with appropriate full-detail access.", "9": "Extreme supported content retains clear structure, meaning and action access without hiding important distinctions."}
+    }
+  ]
+}

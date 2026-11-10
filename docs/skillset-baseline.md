@@ -37,7 +37,15 @@ applicable action.
 
 ## Validation
 
-`python3 -m unittest discover -s tests` passed with 23 tests.
+The initial migration passed `python3 -m unittest discover -s tests` with 23 tests.
 `test_ui_council.py` checks the bundled script digests. Local Markdown links were
 checked. Browser and Swift checks depend on local tool availability. Those checks
 do not qualify accessibility with assistive technology or real user outcomes.
+
+## Design-quality extension
+
+The [quality contract](design-quality-contract.md) records the subsequent council
+and implementation for issues `Tigon32/ui-workbench#1` and `Tigon32/ui-workbench#2`.
+The extension adds a default catalogue, absolute adoption gates, evidence rules,
+target profiles and declared rendered checks. The initial four-tool description
+above remains historical. The current skill also includes `profiles.py`.
