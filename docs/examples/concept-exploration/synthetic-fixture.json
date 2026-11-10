@@ -1,0 +1,20 @@
+{
+  "fixture_version": "synthetic-fixture-v1",
+  "records": [
+    {
+      "id": "record-01",
+      "label": "Synthetic finding",
+      "source": "invented-local-source",
+      "uncertainty": "Illustrative, unverified value",
+      "state": "overview"
+    },
+    {
+      "id": "record-02",
+      "label": "Long synthetic finding",
+      "source": "invented-local-source",
+      "uncertainty": "Unknown",
+      "state": "detail"
+    }
+  ],
+  "states": ["overview", "detail", "empty", "error"]
+}

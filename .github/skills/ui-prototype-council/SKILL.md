@@ -26,6 +26,13 @@ explicit authorization. Confirm the providers, call count and any spend limit be
 generation or review. This skill does not authorize network access, model spend or
 publication.
 
+When the project needs to establish or challenge the shared intent before choosing
+layouts, use the upstream
+[what-council concept-exploration skill](../what-council-exploration/SKILL.md).
+Its project advisor/adversary/judge handoff is distinct from this prototype reviewer
+council. This skill still owns prototype gates, captures, review, selection and
+refinement; an exploration result is not approval or a reviewer vote.
+
 ## Parameters
 
 | Parameter | What the project supplies |

@@ -1,0 +1,166 @@
+{
+  "format_version": 1,
+  "brief_version": "2.0",
+  "selection_policy": "compare_compatible_inputs_only",
+  "input_revisions": {
+    "brief": {
+      "revision": "intake-v2",
+      "parent_revision": "intake-v1",
+      "change": "Added the what-council source, authority, assumption and objection record."
+    },
+    "fixture": {
+      "revision": "synthetic-fixture-v1",
+      "parent_revision": null,
+      "change": null
+    },
+    "tasks": {
+      "revision": "synthetic-tasks-v1",
+      "parent_revision": null,
+      "change": null
+    },
+    "constraints": {
+      "revision": "synthetic-constraints-v1",
+      "parent_revision": null,
+      "change": null
+    },
+    "platforms": {
+      "revision": "desktop-browser-v1",
+      "parent_revision": null,
+      "change": null
+    },
+    "rubric": {
+      "revision": "synthetic-rubric-v1",
+      "parent_revision": null,
+      "change": null
+    }
+  },
+  "shared_tasks": ["find-record", "inspect-source", "recover-error"],
+  "required_states": ["overview", "detail", "empty", "error"],
+  "directions": [
+    {
+      "id": "chronological-stream",
+      "title": "Chronological evidence stream",
+      "organizing_principle": "Keep findings in time order and attach provenance and uncertainty to each event.",
+      "eligible": true,
+      "inputs": {
+        "brief": {"revision": "intake-v2", "parent_revision": "intake-v1", "change": "Added the what-council source, authority, assumption and objection record."},
+        "fixture": {"revision": "synthetic-fixture-v1", "parent_revision": null, "change": null},
+        "tasks": {"revision": "synthetic-tasks-v1", "parent_revision": null, "change": null},
+        "constraints": {"revision": "synthetic-constraints-v1", "parent_revision": null, "change": null},
+        "platforms": {"revision": "desktop-browser-v1", "parent_revision": null, "change": null},
+        "rubric": {"revision": "synthetic-rubric-v1", "parent_revision": null, "change": null}
+      },
+      "tasks": ["find-record", "inspect-source", "recover-error"],
+      "task_approach": "Find the record through its chronology and expand provenance inline.",
+      "assessed_states": ["overview", "detail", "error"],
+      "distinctness_review": {
+        "reviewer_kind": "project_team_qualitative",
+        "rationale": "Chronology is the primary navigation and source details expand within each event.",
+        "material_differences": ["time-ordered information architecture", "inline evidence expansion", "event-first recovery"],
+        "color_only": false
+      }
+    },
+    {
+      "id": "evidence-workspace",
+      "title": "Evidence workspace",
+      "organizing_principle": "Group records by investigation and expose source relationships alongside a selected item.",
+      "eligible": true,
+      "inputs": {
+        "brief": {"revision": "intake-v2", "parent_revision": "intake-v1", "change": "Added the what-council source, authority, assumption and objection record."},
+        "fixture": {"revision": "synthetic-fixture-v1", "parent_revision": null, "change": null},
+        "tasks": {"revision": "synthetic-tasks-v1", "parent_revision": null, "change": null},
+        "constraints": {"revision": "synthetic-constraints-v1", "parent_revision": null, "change": null},
+        "platforms": {"revision": "desktop-browser-v1", "parent_revision": null, "change": null},
+        "rubric": {"revision": "synthetic-rubric-v1", "parent_revision": null, "change": null}
+      },
+      "tasks": ["find-record", "inspect-source", "recover-error"],
+      "task_approach": "Find the record within an investigation group and inspect source relationships in the workspace.",
+      "assessed_states": ["overview", "detail", "empty", "error"],
+      "distinctness_review": {
+        "reviewer_kind": "project_team_qualitative",
+        "rationale": "Investigation groups and a persistent relationship workspace replace time order as the organizing model.",
+        "material_differences": ["group-first information architecture", "persistent source relationship view", "selection-led recovery"],
+        "color_only": false
+      }
+    },
+    {
+      "id": "color-only-variant",
+      "title": "Blue version of the chronological stream",
+      "organizing_principle": "Retain the chronological stream and change only its color theme.",
+      "eligible": false,
+      "inputs": {
+        "brief": {"revision": "intake-v2", "parent_revision": "intake-v1", "change": "Added the what-council source, authority, assumption and objection record."},
+        "fixture": {"revision": "synthetic-fixture-v1", "parent_revision": null, "change": null},
+        "tasks": {"revision": "synthetic-tasks-v1", "parent_revision": null, "change": null},
+        "constraints": {"revision": "synthetic-constraints-v1", "parent_revision": null, "change": null},
+        "platforms": {"revision": "desktop-browser-v1", "parent_revision": null, "change": null},
+        "rubric": {"revision": "synthetic-rubric-v1", "parent_revision": null, "change": null}
+      },
+      "tasks": ["find-record", "inspect-source", "recover-error"],
+      "task_approach": "Uses the same tasks but changes only theme.",
+      "assessed_states": [],
+      "distinctness_review": {
+        "reviewer_kind": "project_team_qualitative",
+        "rationale": "This changes the theme only and contributes no distinct concept direction.",
+        "material_differences": [],
+        "color_only": true
+      }
+    }
+  ],
+  "comparison_review": {
+    "reviewer_kind": "project_team_qualitative",
+    "rationale": "The two eligible directions organize information and recovery around different user-facing models.",
+    "pairwise_reviews": [
+      {
+        "direction_ids": ["chronological-stream", "evidence-workspace"],
+        "rationale": "The candidates use different primary navigation and relationships between the result and its sources.",
+        "material_differences": [
+          "time order versus investigation grouping",
+          "inline event details versus persistent source relationships"
+        ],
+        "color_only": false
+      }
+    ],
+    "claims_mechanical_creativity": false,
+    "novelty_threshold": null
+  },
+  "review_evidence": [
+    {
+      "kind": "generator_self_score",
+      "reviewer": "synthetic-generator",
+      "model": null,
+      "note": "Illustrative only; never a prototype-council vote."
+    },
+    {
+      "kind": "model_review",
+      "reviewer": "not-run",
+      "model": null,
+      "note": "No model review was performed for this local example."
+    },
+    {
+      "kind": "human_evidence",
+      "reviewer": "not-collected",
+      "model": null,
+      "note": "No human or usability evidence is claimed."
+    }
+  ],
+  "handoff": {
+    "prototype_selection": {
+      "skill": "ui-prototype-council",
+      "status": "exploratory-inputs-ready",
+      "brief_ref": "project-intake-v2.json",
+      "fixture_ref": "synthetic-fixture.json",
+      "task_ref": "tasks.json",
+      "rubric_ref": "rubric.json",
+      "direction_ids": ["chronological-stream", "evidence-workspace"]
+    },
+    "refinement": {
+      "skill": "ui-prototype-council",
+      "format_version": 2,
+      "canonical_brief_ref": "project-intake-v2.json",
+      "selected_candidate": null,
+      "status": "pending_existing_prototype_selection"
+    }
+  },
+  "acceptance_claim": false
+}

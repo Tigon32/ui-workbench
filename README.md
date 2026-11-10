@@ -9,11 +9,14 @@ product interface or project-specific design rules.
 | Need | Skill | Result |
 |---|---|---|
 | Resolve a design goal, a blocking choice or a needed deferral | [`interface-design-review`](.github/skills/interface-design-review/SKILL.md) | A bounded decision map with evidence, choices and deferrals |
+| Derive a sourced WHAT and explore different concept directions | [`what-council-exploration`](.github/skills/what-council-exploration/SKILL.md) | A challenged, versioned project handoff for prototype selection |
 | Select or incrementally refine interface prototypes | [`ui-prototype-council`](.github/skills/ui-prototype-council/SKILL.md) | Measured increments, deterministic gates and a computed selection/adoption outcome |
 
 Use the review skill when requirements or constraints are not settled. Use the
-prototype council only when the brief, fixture and rubric are ready. Neither
-skill builds the product interface.
+what-council exploration when user intent is understood but materially
+different interface directions should be compared. Use the prototype council
+only when the brief, fixture and rubric are ready. Neither skill builds the
+product interface.
 
 ## Design quality and adoption
 
@@ -76,6 +79,17 @@ The [version-2 intake](docs/examples/refinement/project-intake-v2.json),
 illustrate local synthetic data, incomplete-brief exploration, project authority,
 whole-page/journey coverage and plateau direction. Automated ledger tests build
 and verify runnable format-2 fixtures without uploads or model calls.
+
+## Explore from a project WHAT
+
+The [what-council exploration skill](.github/skills/what-council-exploration/SKILL.md)
+adds an upstream project advisor/adversary/judge handoff. It distinguishes
+user intent from layout HOW, versions comparison inputs and qualitative
+direction review, then hands candidates to the existing prototype-selection
+and format-2 refinement loops. It does not replace the structured brief or
+grant external-call authorization. The local validator and all-synthetic
+example are documented in
+[`docs/examples/concept-exploration`](docs/examples/concept-exploration/README.md).
 
 ## Checks
 

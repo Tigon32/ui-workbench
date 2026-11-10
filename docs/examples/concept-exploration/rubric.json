@@ -1,0 +1,9 @@
+{
+  "revision": "synthetic-rubric-v1",
+  "note": "Illustrative comparison prompts only; no score threshold or adoption gate is declared.",
+  "qualitative_dimensions": [
+    "Can the user find a record?",
+    "Can the user understand its source and uncertainty?",
+    "Can the user recover from an error?"
+  ]
+}

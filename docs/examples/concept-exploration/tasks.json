@@ -1,0 +1,8 @@
+{
+  "revision": "synthetic-tasks-v1",
+  "tasks": [
+    {"id": "find-record", "goal": "Find the synthetic record."},
+    {"id": "inspect-source", "goal": "Inspect its source and uncertainty."},
+    {"id": "recover-error", "goal": "Recognize and recover from an error state."}
+  ]
+}
