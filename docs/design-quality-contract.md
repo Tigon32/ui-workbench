@@ -220,6 +220,38 @@ System Usability Scale responses and engineering results separate.
 No composite design total may absorb or replace those measures.
 Do not upload private fixtures, screenshots, source or user records without authorization.
 
+## What-council concept exploration
+
+The [what-council exploration skill](../.github/skills/what-council-exploration/SKILL.md)
+is an optional upstream path. It extends the existing structured format-2
+project brief rather than creating a parallel source of truth. The adopting
+project records its advisor, adversary and judge roles, sources, assumptions
+and confidence, objections and rulings, project authority, and unresolved
+questions. Missing roles or unresolved critical objections block completion.
+An incomplete handoff may support labelled exploration, never acceptance.
+The sponsor retains sponsor-owned decisions; explicitly delegated decisions
+do not require approval of every implementation detail. Claimed sponsor
+approval needs an attributable approval source.
+
+WHAT describes the user need, intended information and decision/task. HOW
+proposes a layout or interaction model. An unsourced layout prescription is
+flagged for council review, not rejected by a keyword rule. A separate,
+sourced and authorized design-system or platform constraint is permitted.
+At least two directions use the same versioned brief, fixture, tasks,
+constraints, platforms and rubric. Qualitative review explains material
+differences and flags color-only variants; it does not mechanically prove
+creativity or novelty. Changed input versions remain visible, incompatible
+comparisons are not ranked, and states without evidence stay unassessed.
+
+The result feeds the existing static prototype-selection loop and, after
+selection, the existing format-2 refinement loop. Generator self-scores,
+declared model reviews and human evidence remain distinct. Same-model role
+use does not establish independent judgement. Neither loop proves real-user
+usability or product approval. The local validator checks declarations, not
+source truth or authority authenticity; its preflight performs no external
+action and denies an action without an explicit authorization reference.
+There is no universal model, score, style or novelty threshold.
+
 ## Frugal review and compatibility
 
 Run cheap deterministic checks before any model review.

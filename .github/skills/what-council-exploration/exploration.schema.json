@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tigon32:ui-workbench:what-council-exploration:v1",
+  "title": "What-council concept comparison",
+  "description": "Comparison metadata referring to the canonical format-2 project brief; semantic compatibility and authority checks are performed by what_council.py.",
+  "type": "object",
+  "required": [
+    "format_version",
+    "brief_version",
+    "selection_policy",
+    "input_revisions",
+    "shared_tasks",
+    "required_states",
+    "directions",
+    "comparison_review",
+    "review_evidence",
+    "handoff",
+    "acceptance_claim"
+  ],
+  "properties": {
+    "format_version": {"const": 1},
+    "brief_version": {"type": "string", "minLength": 1},
+    "selection_policy": {"type": "string", "minLength": 1},
+    "input_revisions": {
+      "type": "object",
+      "required": ["brief", "fixture", "tasks", "constraints", "platforms", "rubric"],
+      "properties": {
+        "brief": {"$ref": "#/$defs/revision"},
+        "fixture": {"$ref": "#/$defs/revision"},
+        "tasks": {"$ref": "#/$defs/revision"},
+        "constraints": {"$ref": "#/$defs/revision"},
+        "platforms": {"$ref": "#/$defs/revision"},
+        "rubric": {"$ref": "#/$defs/revision"}
+      }
+    },
+    "shared_tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "required_states": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "directions": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"$ref": "#/$defs/direction"}
+    },
+    "comparison_review": {
+      "type": "object",
+      "required": ["reviewer_kind", "rationale", "pairwise_reviews", "claims_mechanical_creativity"],
+      "properties": {
+        "reviewer_kind": {"type": "string", "minLength": 1},
+        "rationale": {"type": "string", "minLength": 1},
+        "pairwise_reviews": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/pairwiseReview"}
+        },
+        "claims_mechanical_creativity": {"type": "boolean"}
+      }
+    },
+    "review_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "reviewer", "note"],
+        "properties": {
+          "kind": {"enum": ["generator_self_score", "model_review", "human_evidence"]},
+          "reviewer": {"type": "string", "minLength": 1},
+          "model": {"type": ["string", "null"]},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "required": ["prototype_selection", "refinement"],
+      "properties": {
+        "prototype_selection": {
+          "type": "object",
+          "required": ["skill", "brief_ref", "fixture_ref", "task_ref", "rubric_ref", "direction_ids"]
+        },
+        "refinement": {
+          "type": "object",
+          "required": ["skill", "format_version", "canonical_brief_ref", "selected_candidate"],
+          "properties": {"format_version": {"const": 2}}
+        }
+      }
+    },
+    "acceptance_claim": {"type": "boolean"}
+  },
+  "$defs": {
+    "revision": {
+      "type": "object",
+      "required": ["revision", "parent_revision", "change"],
+      "properties": {
+        "revision": {"type": "string", "minLength": 1},
+        "parent_revision": {"type": ["string", "null"]},
+        "change": {"type": ["string", "null"]}
+      }
+    },
+    "direction": {
+      "type": "object",
+      "required": [
+        "id", "title", "organizing_principle", "eligible", "inputs",
+        "tasks", "assessed_states", "distinctness_review"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "organizing_principle": {"type": "string", "minLength": 1},
+        "eligible": {"type": "boolean"},
+        "inputs": {
+          "type": "object",
+          "required": ["brief", "fixture", "tasks", "constraints", "platforms", "rubric"],
+          "properties": {
+            "brief": {"$ref": "#/$defs/revision"},
+            "fixture": {"$ref": "#/$defs/revision"},
+            "tasks": {"$ref": "#/$defs/revision"},
+            "constraints": {"$ref": "#/$defs/revision"},
+            "platforms": {"$ref": "#/$defs/revision"},
+            "rubric": {"$ref": "#/$defs/revision"}
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "assessed_states": {"type": "array", "items": {"type": "string"}},
+        "distinctness_review": {"$ref": "#/$defs/distinctnessReview"}
+      }
+    },
+    "distinctnessReview": {
+      "type": "object",
+      "required": ["reviewer_kind", "rationale", "material_differences", "color_only"],
+      "properties": {
+        "reviewer_kind": {"type": "string", "minLength": 1},
+        "rationale": {"type": "string", "minLength": 1},
+        "material_differences": {"type": "array", "items": {"type": "string"}},
+        "color_only": {"type": "boolean"}
+      }
+    },
+    "pairwiseReview": {
+      "type": "object",
+      "required": ["direction_ids", "rationale", "material_differences", "color_only"],
+      "properties": {
+        "direction_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "rationale": {"type": "string", "minLength": 1},
+        "material_differences": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "color_only": {"type": "boolean"}
+      }
+    }
+  }
+}

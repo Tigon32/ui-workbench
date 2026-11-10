@@ -1,0 +1,176 @@
+{
+  "brief_version": "2.0",
+  "status": "incomplete",
+  "users_and_jobs": [
+    "Synthetic desktop analyst finding a record and deciding whether its source warrants follow-up."
+  ],
+  "problem": "A compact summary can hide an exception or its provenance.",
+  "desired_outcomes": [
+    "Find the record.",
+    "Understand the source and uncertainty of its evidence.",
+    "Decide what to investigate next."
+  ],
+  "platforms": ["desktop browser"],
+  "scenarios": [
+    "dense overview",
+    "long-text detail",
+    "empty result",
+    "error recovery"
+  ],
+  "constraints": [
+    "Use the declared synthetic fixture and keep all example data local."
+  ],
+  "quality_goal": {
+    "score": 8,
+    "fraction": 0.6,
+    "status": "proposed",
+    "decision_id": "project-quality-goal"
+  },
+  "available_evidence": ["synthetic fixture and declared task list"],
+  "budget": {
+    "limit_minutes": 60
+  },
+  "stop_conditions": [
+    "Stop exploration when the declared concept-comparison budget is reached."
+  ],
+  "non_goals": [
+    "No real-user, accessibility, product-approval, creativity or usability claim."
+  ],
+  "unresolved_questions": [
+    "Sponsor has not approved the illustrative score target or adoption gate."
+  ],
+  "critical_unknowns": [
+    "Sponsor decision on the illustrative project quality goal."
+  ],
+  "decision_authority": {
+    "sponsor_decisions": ["project-quality-goal"],
+    "agent_delegated_decisions": ["concept-structure"],
+    "decisions": [
+      {
+        "id": "project-quality-goal",
+        "owner": "sponsor",
+        "status": "proposed",
+        "decision": "Approve or revise the illustrative project-owned target."
+      },
+      {
+        "id": "concept-structure",
+        "owner": "agent",
+        "status": "approved",
+        "decision": "Propose and compare layouts within the shared WHAT; do not ask for approval of each delegated detail."
+      }
+    ]
+  },
+  "sources": [
+    {
+      "id": "synthetic-job-record",
+      "kind": "synthetic_project_record",
+      "reference": "fixture:discovery-notes-v1",
+      "description": "Invented local example record; not user research."
+    },
+    {
+      "id": "synthetic-design-system",
+      "kind": "design_system",
+      "reference": "docs/examples/concept-exploration/design-system-note.txt",
+      "description": "Synthetic example constraint on use of established semantic tokens."
+    }
+  ],
+  "constraint_authorities": [
+    {
+      "id": "design-system-governance",
+      "owner": "project_design_system",
+      "source_ref": "synthetic-design-system",
+      "decision": "Keep semantic token roles; layout remains open for exploration."
+    }
+  ],
+  "what_items": [
+    {
+      "id": "retain-provenance",
+      "kind": "information_need",
+      "statement": "An analyst needs each finding's source and uncertainty to decide whether to investigate it.",
+      "source_refs": ["synthetic-job-record"],
+      "confidence": "medium"
+    },
+    {
+      "id": "source-and-uncertainty-token-roles",
+      "kind": "design_constraint",
+      "statement": "Use the project's established semantic token roles.",
+      "source_refs": ["synthetic-design-system"],
+      "authority_ref": "design-system-governance",
+      "confidence": "high"
+    },
+    {
+      "id": "suggested-filter-rail",
+      "kind": "layout_prescription",
+      "statement": "Put filters in a left rail beside a three-column table.",
+      "source_refs": [],
+      "confidence": "low",
+      "council_disposition": "reclassified_as_direction"
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "dense-list-may-aid-scanning",
+      "statement": "A dense list may help an analyst scan a large result set.",
+      "source_refs": [],
+      "confidence": "low",
+      "owner": "agent",
+      "treatment": "exploratory",
+      "promoted_to_fact": false
+    }
+  ],
+  "what_council": {
+    "mode": "synthetic",
+    "execution_note": "Illustrative local records only; no agent or external model was invoked.",
+    "same_model_limitation_disclosed": false,
+    "members": [
+      {
+        "role": "advisor",
+        "actor": "synthetic-advisor",
+        "model_id": "not-run",
+        "perspective": "Propose user jobs, information and outcomes from declared sources."
+      },
+      {
+        "role": "adversary",
+        "actor": "synthetic-adversary",
+        "model_id": "not-run",
+        "perspective": "Challenge unsupported assumptions, missing states and hidden design prescriptions."
+      },
+      {
+        "role": "judge",
+        "actor": "synthetic-judge",
+        "model_id": "not-run",
+        "perspective": "Record rulings within delegated authority and preserve sponsor-owned unknowns."
+      }
+    ],
+    "objections": [
+      {
+        "id": "layout-is-not-a-user-need",
+        "raised_by": "adversary",
+        "severity": "material",
+        "item_id": "suggested-filter-rail",
+        "objection": "The suggested rail and table are a HOW prescription without a source, not a user need."
+      },
+      {
+        "id": "score-goal-needs-sponsor",
+        "raised_by": "adversary",
+        "severity": "critical",
+        "item_id": "project-quality-goal",
+        "objection": "The illustrative adoption target remains sponsor-owned and is not approved."
+      }
+    ],
+    "rulings": [
+      {
+        "objection_id": "layout-is-not-a-user-need",
+        "judge_role": "judge",
+        "status": "resolved",
+        "decision": "Retain the need for provenance in WHAT; move the unsourced rail/table suggestion to one optional direction."
+      },
+      {
+        "objection_id": "score-goal-needs-sponsor",
+        "judge_role": "judge",
+        "status": "resolved",
+        "decision": "Do not approve or infer the goal. Preserve the sponsor-owned unknown and allow exploratory comparison only."
+      }
+    ]
+  }
+}
