@@ -9,7 +9,7 @@ product interface or project-specific design rules.
 | Need | Skill | Result |
 |---|---|---|
 | Resolve a design goal, a blocking choice or a needed deferral | [`interface-design-review`](.github/skills/interface-design-review/SKILL.md) | A bounded decision map with evidence, choices and deferrals |
-| Select among interface prototypes | [`ui-prototype-council`](.github/skills/ui-prototype-council/SKILL.md) | Deterministic gate results and a computed selection outcome |
+| Select or incrementally refine interface prototypes | [`ui-prototype-council`](.github/skills/ui-prototype-council/SKILL.md) | Measured increments, deterministic gates and a computed selection/adoption outcome |
 
 Use the review skill when requirements or constraints are not settled. Use the
 prototype council only when the brief, fixture and rubric are ready. Neither
@@ -31,6 +31,36 @@ Generator self-assessment does not count as a council vote.
 The [quality contract](docs/design-quality-contract.md) records the bounded
 council, coverage map, scoring formula, evidence rules and limitations.
 The total is expert judgment, not human usability or accessibility certification.
+
+## Improve an existing prototype
+
+Use the [refinement loop](.github/skills/ui-prototype-council/SKILL.md#iterative-refinement-loop),
+not one large edit followed by a before/after score.
+First declare the project-owned target, iteration cap, no-gain limit and meaningful
+gain. Keep conditions fixed and record every attempt in the
+[iteration ledger](docs/design-quality-contract.md#iteration-ledger).
+
+Illustration only; these scores are synthetic, not council or usability results:
+
+1. **Baseline:** preserve source, inputs, full Tier 1/2 reports and captures;
+   record typography 6/10 and neighboring dimensions with evidence.
+2. **Increment:** name the hypothesis "a coherent heading scale improves reading
+   roles"; change that scale in `DESIGN.md` and regenerate tokens.
+3. **Measure and keep:** rerun all declared checks, widths, themes, states and tasks.
+   Re-score typography and affected neighbors. If the declared gain is observed
+   (for example 6 to 7) with no regression or missing coverage, provisionally keep
+   and log it. Shared-token changes need a documented impact assessment.
+4. **Next attempt and revert:** make and measure only the next small change.
+   If it introduces a mobile overflow, revert only that attempt, preserve its
+   evidence and verify the preceding accepted source. A higher score cannot offset it.
+
+Do not start the next increment before measurement and keep/revert are recorded.
+Stop at a provisional target, the no-gain limit or the iteration cap; stop blocked
+if evidence or restoration cannot be verified. Then obtain one fresh full
+council/adoption review when unblocked. Self-scores can guide edits, not acceptance.
+The [council record](docs/design-quality-contract.md#refinement-council-record)
+explains the evidence and execution safeguards added to this loop.
+The ledger format is documented; no ledger validator or `iterate.py` tool is bundled.
 
 ## Checks
 

@@ -1,12 +1,13 @@
 ---
 name: ui-prototype-council
-description: Choose a user interface design by generating prototypes, rejecting the ones that fail deterministic checks, scoring the rest blind with a calibrated reviewer council, and eliminating and refining until one wins or the run reports no clear winner. Use when a design must be selected, not when one is being built.
+description: Select among static browser prototypes with deterministic gates and a calibrated reviewer council, or improve an existing prototype through bounded change-measure-keep/revert increments. Use for prototype selection or refinement, not product interface implementation.
 ---
 
 # UI prototype council
 
-This skill selects a design. It does not build the product interface, and a council
-score is not a usability result. Measure real people separately.
+This skill selects or refines a static browser prototype. It does not build the
+product interface, and a council score is not a usability result.
+Measure real people separately.
 
 Everything the loop needs is here: the protocol, the prompts, the score format and five
 standard-library scripts. A re-run does not re-derive the method. The project supplies
@@ -116,6 +117,9 @@ from it. Never hand-edit either output; `--check` refuses a difference.
 
 ## The loop
 
+This is the round-based selection loop. To improve an existing prototype,
+use the separate refinement loop below.
+
 Per round:
 
 1. **Generate.** Make one call per prototype, in parallel, with the generator prompt
@@ -143,10 +147,76 @@ Per round:
    `council.py --write <run>`, then `--verify <run>`. The script decides `WINNER`,
    `CONTINUE`, `VOID` or `NO_CLEAR_WINNER`. Do not override it.
 6. **Refine.** Give each survivor the anonymized reasons from its own entry only, and ask
-   for a revision that addresses them without copying another entry.
+   for bounded, measured increments through the refinement loop below, without
+   copying another entry. A next selection round still needs fresh gates and scores.
 
 Stop at `WINNER` or `NO_CLEAR_WINNER`. A `VOID` round (fewer than two calibrated
 reviewers) decides nothing. Re-run it once, then stop and report.
+
+## Iterative refinement loop
+
+Use this loop for an existing prototype, not to manufacture a council winner.
+Before editing, declare the target and rationale, maximum attempted increments,
+consecutive no-gain limit and positive minimum meaningful gain.
+Counts must be positive integers;
+declare score-repeat counts and the agreement rule too. The workbench supplies
+no defaults. Put score targets in `adoption_gate` with an
+`adoption_decision`. Its thresholds are inclusive: clarify a request such as
+">85/100" before translating it; do not silently use `total_min: 85`.
+Keep the rubric, fixtures, tools, profiles, themes, states, tasks and budgets fixed.
+
+1. **Baseline.** Before any edit, run the full project Tier 1/2 contract, including
+   token checks and `render_check.py` across every declared page, width, theme,
+   state and task. Record findings, coverage, dimension scores and reviewer kind.
+   Preserve source, inputs, reports and captures as an immutable, hash-bound
+   baseline. A score without evidence is unassessed.
+2. **One increment.** Pick one failing check or weak dimension and its affected
+   neighbors. Record a named hypothesis and expected gain before editing.
+   Make one small change. Do not batch unrelated fixes.
+3. **Re-measure.** Before starting another increment, rerun the complete
+   deterministic contract under the same conditions. Capture fresh evidence.
+   Re-score targeted dimensions and affected neighbors. Inspect the remaining
+   captures for regressions; expand the assessment if another dimension may be
+   affected. Shared token/theme/layout edits affect all dimensions unless the
+   ledger justifies a narrower set. Mark fresh versus carried scores and their
+   last assessed source. Carried scores remain historical, not newly verified.
+4. **Keep or revert.** Keep only an observed targeted improvement that meets the
+   declared minimum gain, with no new/worsened finding, coverage loss or assessed
+   dimension regression. A previously observed score becoming null also blocks
+   keeping. A repaired failure can be the gain only for a named target check;
+   do not invent a subjective score for it.
+   Unknown or suspected regressions block keeping.
+   Otherwise restore only this increment's edits, preserve its rejected evidence
+   and verify the retained source matches the preceding accepted snapshot.
+   An unchanged known failure can remain during refinement, but blocks adoption.
+5. **Log.** Append the attempted change, before/after evidence, deltas, decision
+   and retained source to the iteration ledger. Complete measurement and the
+   keep/revert record before the next increment starts. Rejected attempts count
+   toward both caps. Reserve and count an attempt before editing; an interrupted
+   attempt without a decision is blocked, not a free retry.
+   Stop blocked if measurement or restoration cannot be verified.
+6. **Stop and review.** Stop at a provisional target, the consecutive no-gain
+   limit or the attempted-increment cap. The no-gain count resets only after a
+   kept, measured improvement. Then run one fresh full council/adoption review of the
+   retained source, with complete coverage and declared evidence. Reaching a cap
+   is not adoption. A blocked run remains blocked until its evidence is available.
+
+When stops coincide, use `blocked`, then provisional target, then no-gain limit,
+then iteration cap. A blocked attempt counts toward the cap and does not reset
+the no-gain streak. Tool or reviewer drift blocks comparison until resolved.
+
+Generator self-scores may guide increments, but never count as acceptance scores.
+All increment keeps are provisional retention decisions, not independent proof of
+subjective improvement. Record that explicitly; an independent reviewer can supply
+stronger progress evidence without requiring a new full council at each edit.
+Do not pass carried or mixed-revision progress scores to `council.py` as a fresh
+review. A provisional target is only a reason to stop editing and request the full
+review; it is not `ADOPTABLE`. Do not reset caps or change thresholds to force a pass.
+Use the contract's explicit provisional-target test, not an asserted current total.
+Model calls and final review still require the authorization above.
+
+The [refinement contract](../../../docs/design-quality-contract.md#iterative-refinement)
+defines the ledger, comparison rules and terminal outcomes.
 
 ## Calibration pair
 

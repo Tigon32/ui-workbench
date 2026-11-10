@@ -220,6 +220,242 @@ An optional gate on a legacy rubric reports scores, but cannot claim adoption
 without version 3 evidence.
 Do not recalculate historical scores as if missing dimensions had been assessed.
 
+## Iterative refinement
+
+Selection compares alternatives. Refinement improves one existing prototype through
+separate measured increments. Neither process implements a product interface.
+Do not replace several measured increments with a batch edit and one final check.
+
+Before editing, freeze the rubric and adoption rationale, fixture, check commands,
+tool versions, target profiles, themes, states, tasks and budgets in a run contract.
+Declare positive integer attempted-increment and consecutive no-gain limits, and a
+positive minimum meaningful gain for each targeted score or deterministic measure.
+Name each targeted check and define the scored-gain repeat count and agreement rule.
+Fix the sampling and aggregation rule before measurement; do not choose favorable
+samples, retry until a score passes or rescore an attempt after its decision.
+There are no workbench defaults for these limits or adoption thresholds.
+For raw score gains, use the anchored 1-10 scale, not a rounded total.
+Use the predeclared repetitions for borderline observations; inconclusive evidence
+blocks a keep rather than authorizing further samples until one passes.
+
+Score targets belong in `adoption_gate`, with rationale in `adoption_decision`.
+The gate uses inclusive comparisons. A request for ">85/100" is not equivalent to
+`total_min: 85`; settle the intended inclusive threshold with the owner before the
+run. Do not change weights, exclusions or targets after seeing a candidate's score.
+A changed contract needs an explicitly authorized new baseline, not a reset that
+hides previous attempts.
+
+### Measurement and keep/revert
+
+Capture a complete baseline before the first edit. Preserve its source and relevant
+inputs, actual reports, scores, conditions and captures under immutable identities.
+Include uncommitted inputs if the source revision alone does not identify them.
+Source snapshots list exact in-scope files and hashes, including pre-existing edits.
+Keep each accepted and rejected candidate snapshot; never overwrite baseline evidence.
+Store private artifacts only in the target project's authorized local run location.
+
+Each attempt has one named hypothesis, target and bounded change. Record the
+hypothesis before editing. Rerun the complete deterministic contract after the change,
+including all declared pages, widths, themes, states, tasks and generated-token checks.
+Do not narrow the check set to the changed view.
+Re-score the target and affected neighboring dimensions against fresh evidence.
+Shared token, theme or layout edits affect all dimensions unless a recorded impact
+assessment justifies a narrower set. Generated output does not narrow the impact
+of its source tokens.
+Inspect all new captures for other changes and expand the scored set when needed.
+Preserve reviewer kind, identity/model version and scoring conditions for comparisons.
+If they change, stop blocked until comparable before/after evidence is available
+under the frozen contract, or the owner authorizes a new baseline. Never subtract
+incomparable scores. Self-scores are directional progress evidence only.
+
+Compare finding identity and severity, task success and action budgets, coverage and
+assessed dimension scores. A lower total finding count cannot hide a new failure.
+A check becoming incomplete or unsupported is a regression, not a zero-finding pass.
+Any new finding, severity increase or previously observed dimension becoming null
+or lower blocks keeping. Targeted and affected dimensions need comparable observed
+scores before and after if a score gain is claimed.
+An unresolved question about a possible regression blocks keeping the increment.
+Do not claim unchanged dimensions were re-verified merely because their old scores
+were carried forward.
+
+Keep only a targeted gain meeting its declared minimum with no regression.
+The gain can repair a failure only in a check named by the declared target measure;
+do not also award subjective points for the same decidable result.
+Unchanged known failures may remain while refining, but still block adoption.
+A neutral change, insufficient gain or any regression means
+revert this attempt, retain its evidence and record why. Restore only the attempt's
+edits; do not discard someone else's work. Verify the retained source identity.
+Preserve the exact attempt patch. Reverse only its edits, not whole files containing
+someone else's changes. Verify in-scope file hashes against the preceding accepted
+snapshot and record the result. A conflicting concurrent edit blocks restoration.
+If measurement or restoration fails, record `blocked` and stop.
+Complete the measurement and decision record before another edit starts.
+
+Every increment `keep` is provisional: it retains a candidate for further work,
+not an independently validated quality gain or adoption. Mark it `provisional: true`.
+Generator self-scores may guide that decision, but are not acceptance evidence.
+An independent reviewer, blind to before/after order, can strengthen subjective
+progress evidence where the project requires it. This does not require a full
+council for every increment. Final acceptance always needs the fresh review below.
+
+### Iteration ledger
+
+Use a project-local `iterations.json` with this envelope:
+
+| Field | Required contents |
+|---|---|
+| `format_version` | `1`, identifying this documented format |
+| `contract_ref` | Frozen run contract, including rubric, target rationale, conditions, caps and minimum gains |
+| `artifacts` | Reference ID to `{path, sha256}` for source snapshots, inputs, reports, scores and captures |
+| `baseline` | Source, full checks, complete dimension assessment and evidence references before editing |
+| `iterations` | Completed attempt records in order, as illustrated below |
+| `stop` | `null` while running; otherwise reason, retained source and final-review status/reference |
+
+Use unique positive sequential attempt IDs.
+Reserve each ID in an immutable proposal before editing; that starts a counted attempt.
+If interrupted before a complete decision is recorded, preserve the current state,
+record that attempt as blocked and reconcile it before any further increment.
+Do not silently discard or retry it under a new ID.
+Every artifact reference must resolve to preserved bytes with a verified SHA-256
+digest. Check records must identify full coverage and actual pass/fail/incomplete
+status, not only finding counts. Score records identify reviewer provenance,
+dimensions assessed, reasons, evidence status and references.
+Each dimension score also records `assessment` (`reassessed` or `carried`),
+`assessed_attempt` (baseline is `0`) and `assessed_source_ref`.
+Retain before and after reviewer provenance separately in their score artifacts.
+Carried entries preserve their real last-assessed source and evidence; a new
+iteration ID must not make an old score appear fresh.
+Missing required observations have null scores, never an assumed zero or midpoint.
+Record each raw-score delta as `after - before`; do not combine incomparable reviews.
+
+For example, one completed record in `iterations` has this shape.
+The names and numbers are synthetic, not a measured result or default policy;
+reference IDs must resolve in the run's `artifacts` map:
+
+```json
+{
+  "id": 1,
+  "hypothesis": "One heading scale will make the reading hierarchy clearer.",
+  "proposal_ref": "attempt-1/proposal-before-edit",
+  "patch_ref": "attempt-1/patch",
+  "impact_ref": "attempt-1/impact-assessment",
+  "target_dimensions": ["typography"],
+  "target_checks": [],
+  "affected_dimensions": [
+    "hierarchy", "spacing_density", "layout", "responsive_behavior",
+    "text_resilience", "accessibility"
+  ],
+  "files_changed": ["DESIGN.md", "tokens.css"],
+  "before": {
+    "source_ref": "baseline/source",
+    "checks_ref": "baseline/checks",
+    "scores_ref": "baseline/scores",
+    "evidence": ["baseline/captures"]
+  },
+  "after": {
+    "source_ref": "attempt-1/source",
+    "checks_ref": "attempt-1/checks",
+    "scores_ref": "attempt-1/scores",
+    "evidence": ["attempt-1/captures"]
+  },
+  "dimension_deltas": {
+    "typography": {"before": 6, "after": 7, "delta": 1},
+    "hierarchy": {"before": 7, "after": 7, "delta": 0},
+    "spacing_density": {"before": 7, "after": 7, "delta": 0},
+    "layout": {"before": 7, "after": 7, "delta": 0},
+    "responsive_behavior": {"before": 7, "after": 7, "delta": 0},
+    "text_resilience": {"before": 7, "after": 7, "delta": 0},
+    "accessibility": {"before": 7, "after": 7, "delta": 0}
+  },
+  "reviewer_kind": "generator",
+  "regressions": [],
+  "decision": "keep",
+  "provisional": true,
+  "reason": "The declared one-point gain was observed, with no detected regression.",
+  "retained_source_ref": "attempt-1/source",
+  "restore_verification_ref": null
+}
+```
+
+`decision` is `keep`, `revert` or `blocked`. For `revert`, retain the rejected
+`after` evidence and reference the verified preceding accepted source.
+Its `restore_verification_ref` must resolve to the file/hash comparison and actual
+restoration result; it is null when no restoration was needed.
+For `blocked`, record the missing observation or failed restoration explicitly;
+do not start another attempt. Use null for unmeasured values or an unverified
+retained source, and preserve any failed restoration report. Do not invent completed
+measurements to fill the record. The proposal artifact records the hypothesis and
+expected gain before edits begin. Append completed attempt records without
+rewriting earlier entries or evidence. The next `before` must reference the
+previous decision's verified retained source.
+Preserve completed ledger revisions as immutable snapshots so an earlier record
+cannot be silently replaced. Record the after-measurement artifacts before deciding.
+
+This is a documented format, not a bundled ledger validator or comparison CLI.
+Parse JSON, verify references/digests and review the comparison and decision rules
+with project-owned checks. The existing browser report output is not this ledger.
+Do not claim an automated regression verdict merely because the JSON parses.
+
+### Stops and final adoption
+
+Record one stop reason: `target_provisionally_met`, `no_gain`, `iteration_cap` or
+`blocked`. Every attempted increment counts toward the cap, including reverts.
+A rejected or neutral attempt increments the consecutive no-gain count.
+An interrupted or blocked attempt also counts toward the cap and does not reset
+that streak. Only a kept measured improvement resets it.
+If several stops apply, choose `blocked` first, then `target_provisionally_met`,
+then `no_gain`, then `iteration_cap`. Thus a kept target-reaching gain at the cap
+stops for the target, but a blocked last attempt cannot claim it.
+Check stop conditions before editing and after every decision.
+If the baseline already meets the provisional target,
+skip edits and proceed directly to the final review.
+
+`target_provisionally_met` requires current full deterministic gate passes and no
+known unresolved regression. The declared progress score set must contain a latest
+observed non-null score for every applicable dimension. Its estimated total must meet
+`total_min`, and each score must meet its dimension floor, `every_dimension_min`
+and, where critical, `critical_min`. Without declared thresholds or complete scores,
+this stop cannot apply. Apply the same test to a baseline that might skip edits.
+Identify carried inputs explicitly. A mixed-revision vector can supply this progress
+estimate only as a review trigger, never a current complete council score.
+
+For the first three stops, run one fresh full council/adoption review on the retained
+source. Preserve that review and record `adoptable`, `not_adoptable` or `blocked`
+with its report reference. A blocked refinement cannot claim acceptance while its
+required evidence is missing. Do not automatically start another cycle after a failed
+final review or extend limits without authorization.
+
+Mixed-revision progress scores and generator self-reviews cannot supply the final
+council vote. Carried scores do not establish a current complete total.
+A provisional target is only a stop signal; caps and no-gain stops are not success.
+Final adoption needs fresh complete evidence, calibrated non-generator reviewers,
+declared floors and project gates, with `--require-adoptable` where blocking is needed.
+No new model call, spend, publication or product change is authorized by the loop.
+
+Repeated tuning can overfit the frozen fixtures. Declare any held-out validation
+cases before refinement and reserve them for final review. If none are available,
+record that limit; do not claim that success generalizes to untested cases.
+Use the immutable baseline to inspect cumulative drift, not only the last increment.
+
+### Refinement council record
+
+On 2026-11-10, two independent-context automated advisors reviewed issue #4 and the
+draft: one covered evidence validity, the other execution and ledger rules.
+The integrating reviewer adjudicated their findings as follows.
+This was a bounded contract review, not a calibrated prototype council, design
+improvement result or human study.
+
+| Concern | Adjudication |
+|---|---|
+| Simultaneous stops, interrupted attempts and cap counting | Add ordered stops, reserved attempt IDs and blocked recovery rules |
+| New findings, missing scores and vague mechanical gains | Explicitly block regressions and require a named target check |
+| Safe restoration and ledger replacement | Record exact source/patch identities, restoration evidence and immutable ledger revisions |
+| Self-awarded subjective gains | Mark all keeps provisional; retain independent final acceptance instead of requiring a new council per edit |
+| Shared-token impact and stale progress scores | Require an impact assessment and per-score assessment/source markers |
+| Undefined provisional target | Define a complete progress-vector/floor test, separate from a current council score |
+| Noise and fixture overfitting | Predeclare repeats/aggregation and held-out cases where available; do not waive regressions as noise |
+| Mandatory hash chains or new helper tooling | Defer; this issue documents a protocol, not automated integrity enforcement or regression comparison |
+
 ## Browser profile usage
 
 Both `render_check.py` and `round_prep.py prepare` accept `--rubric PATH`.
