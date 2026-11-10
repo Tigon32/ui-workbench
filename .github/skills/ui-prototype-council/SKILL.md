@@ -167,6 +167,14 @@ no defaults. Put score targets in `adoption_gate` with an
 ">85/100" before translating it; do not silently use `total_min: 85`.
 Keep the rubric, fixtures, tools, profiles, themes, states, tasks and budgets fixed.
 
+Start a new format-2 refinement ledger from a persisted, versioned project brief
+and explicit sponsor/agent decision authority. Use the project's own score and
+fraction; 9/10 across 80-90% is only an example. An incomplete brief permits
+labelled exploration but not an acceptance claim. Declare stable component,
+region, page, state and journey scopes, and map each measurement point to its
+denominators. Format-1 ledgers remain readable with their original declared
+semantics; do not reinterpret them as format 2.
+
 1. **Baseline.** Before any edit, run the full project Tier 1/2 contract, including
    token checks and `render_check.py` across every declared page, width, theme,
    state and task. Record findings, coverage, dimension scores and reviewer kind.
@@ -181,8 +189,11 @@ Keep the rubric, fixtures, tools, profiles, themes, states, tasks and budgets fi
    Re-score targeted dimensions and affected neighbors. Inspect the remaining
    captures for regressions; expand the assessment if another dimension may be
    affected. Shared token/theme/layout edits affect all dimensions unless the
-   ledger justifies a narrower set. Mark fresh versus carried scores and their
-   last assessed source. Carried scores remain historical, not newly verified.
+   ledger justifies a narrower set. Mark `fresh`, `carried_forward`, `stale` or
+   `unassessed` for every point, retain its assessed source and state the
+   coverage of each evidence reference. Carried scores remain historical, not
+   newly verified; affected points need fresh assessment before they support a
+   current claim.
 4. **Keep or revert.** Keep only an observed targeted improvement that meets the
    declared minimum gain, with no new/worsened finding, coverage loss or assessed
    dimension regression. A previously observed score becoming null also blocks
@@ -312,7 +323,7 @@ together.
 | `design_tokens.py` | `17fe482b02db00e0298401c0e4012fec9ca205ef0f6594a122bf22448b7fdf17` |
 | `round_prep.py` | `c43bedb40da72da616a4b87fb3c462be1f7b54f4149e8ddca74e4ff951131a39` |
 | `profiles.py` | `5aa738737f451df62aced9e3b99a4648b793169cfe3ad094d3719cffd7cc5df5` |
-| `iterations.py` | `a0a7eb7d53c2bf76aa5e273fcda43182bce85ac35ba2dede4ce7a4b90487e749` |
+| `iterations.py` | `cf26ba2897084c314a577ba125b911a63aa892cf58f7bbd87f00e0231a8ef8aa` |
 
 The default catalogue is also pinned:
 

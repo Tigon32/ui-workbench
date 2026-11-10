@@ -31,11 +31,10 @@ Generator self-assessment does not count as a council vote.
 The [quality contract](docs/design-quality-contract.md) records the bounded
 council, coverage map, scoring formula, evidence rules and limitations.
 The total is expert judgment, not human usability or accessibility certification.
-The project goal is an anchored 9/10 across a selected 80-90% of declared
-measurement points. Keep every point in the denominator; unknown evidence
-remains missing, not a 9. This is a goal, not an achieved result.
-Reports distinguish an explicitly selected subset from an all-points claim.
-An unassessed point cannot be dropped from the denominator.
+New refinement ledgers use a versioned project-owned score and fraction; 9/10
+across 80-90% is only an example. Keep the complete inventory, selected
+denominator, exclusions and unknown evidence visible. Format-1 ledgers remain
+readable with their original declared semantics and are not silently migrated.
 
 ## Improve an existing prototype
 
@@ -71,6 +70,12 @@ The bundled [`iterations.py`](.github/skills/ui-prototype-council/iterations.py)
 validates and reports a hash-bound ledger. Run its
 [synthetic comparison example](docs/examples/refinement/README.md) with two
 materially different page layouts and a held-out error task.
+The [version-2 intake](docs/examples/refinement/project-intake-v2.json),
+[overlapping scope map](docs/examples/refinement/scope-map-v2.json) and
+[attempt report excerpt](docs/examples/refinement/attempt-v2-report.example.json)
+illustrate local synthetic data, incomplete-brief exploration, project authority,
+whole-page/journey coverage and plateau direction. Automated ledger tests build
+and verify runnable format-2 fixtures without uploads or model calls.
 
 ## Checks
 

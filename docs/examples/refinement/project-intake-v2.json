@@ -1,0 +1,60 @@
+{
+  "brief_version": "1.0",
+  "status": "incomplete",
+  "users_and_jobs": [
+    "Synthetic desktop analyst finding a record and confirming its source."
+  ],
+  "problem": "A compact summary can hide an exception needed to complete the task.",
+  "desired_outcomes": [
+    "Find the record.",
+    "Retain the per-item source and exception."
+  ],
+  "platforms": ["desktop browser"],
+  "scenarios": [
+    "dense overview",
+    "long-text error state",
+    "cross-page find-and-save journey"
+  ],
+  "constraints": ["Evidence remains local and synthetic."],
+  "quality_goal": {
+    "score": 8,
+    "fraction": 0.6,
+    "status": "proposed",
+    "decision_id": "project-quality-goal"
+  },
+  "available_evidence": ["synthetic render checks"],
+  "budget": {
+    "limit_minutes": 60
+  },
+  "stop_conditions": [
+    "Stop after two no-gain rounds.",
+    "Stop when the declared effort budget is exhausted."
+  ],
+  "non_goals": [
+    "No human usability or assistive-technology result is implied."
+  ],
+  "unresolved_questions": [
+    "Sponsor has not approved the score target or accepted evidence gate."
+  ],
+  "critical_unknowns": [
+    "Sponsor approval of the project quality goal."
+  ],
+  "decision_authority": {
+    "sponsor_decisions": ["project-quality-goal"],
+    "agent_delegated_decisions": ["layout-proposal"],
+    "decisions": [
+      {
+        "id": "project-quality-goal",
+        "owner": "sponsor",
+        "status": "proposed",
+        "decision": "Approve or revise 8/10 across 60% of selected points."
+      },
+      {
+        "id": "layout-proposal",
+        "owner": "agent",
+        "status": "proposed",
+        "decision": "May propose a coherent alternative page layout."
+      }
+    ]
+  }
+}
