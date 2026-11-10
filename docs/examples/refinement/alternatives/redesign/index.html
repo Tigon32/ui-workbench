@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evidence explorer — coherent redesign fixture</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --ink: #20232a;
+      --surface: #ffffff;
+      --accent: #0645ad;
+      --line: #727985;
+      --focus: #0645ad;
+      --space: 1.25rem;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --ink: #f0f2f5; --surface: #17191e; --accent: #9abaff; --line: #a6acb6; --focus: #9abaff; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--surface); font: 16px/1.5 system-ui, sans-serif; }
+    header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space); padding: 1rem 1.5rem; border-bottom: 1px solid var(--line); }
+    header nav { display: flex; flex-wrap: wrap; gap: var(--space); }
+    header a { color: var(--accent); }
+    main { max-width: 70rem; margin: auto; padding: 1.5rem; }
+    .evidence { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--space); }
+    article { padding: 1.25rem; border: 1px solid var(--line); border-radius: .75rem; }
+    .status { font-weight: 700; }
+    button { min-width: 2rem; min-height: 2rem; padding: .5rem 1rem; color: var(--ink); background: var(--surface); border: 1px solid var(--line); }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    [hidden] { display: none !important; }
+    @media (forced-colors: active) { :focus-visible { outline-color: Highlight; } }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Evidence explorer</strong>
+    <nav aria-label="Evidence groups"><a href="#recent">Recent</a><a href="#review">Needs review</a></nav>
+  </header>
+  <main>
+    <h1>Review storage evidence</h1>
+    <section class="evidence" id="review" aria-label="Evidence summary">
+      <article>
+        <h2>Needs review</h2>
+        <p class="status">Three items need a decision.</p>
+        <p>Their space use is not a removal recommendation.</p>
+        <button type="button" id="open-error">Open held-out error case</button>
+        <p id="error" role="alert" hidden>The item cannot be displayed. Its data remains unchanged.</p>
+      </article>
+      <article id="recent"><h2>Recent evidence</h2><p>Observed references do not prove that removal is safe.</p></article>
+    </section>
+  </main>
+  <script>
+    document.getElementById("open-error").addEventListener("click", () => {
+      document.getElementById("error").hidden = false;
+    });
+  </script>
+</body>
+</html>

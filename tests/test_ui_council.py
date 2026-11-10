@@ -214,19 +214,27 @@ class AdoptionTest(unittest.TestCase):
         capture = folder / "synthetic-evidence.txt"
         capture.write_text("Synthetic test evidence, not a real rendered observation.")
         stored = json.loads((folder / "round.json").read_text())
+        target_profiles = {
+            "decision": rubric["target_platform_decision"],
+            "profiles": {"laptop": 1280, "desktop": 1920, "wide": 2560},
+            "widths": [1280, 1920, 2560],
+            "reflow": {"width": 320, "label": "zoom/reflow (not phone)"},
+            "quality_checks": {"semantic_control_parity": True},
+        }
+        if "desktop_zoom" in rubric:
+            target_profiles["desktop_zoom"] = {
+                "percentages": rubric["desktop_zoom"]["percentages"],
+                "evidence_type": "real_browser_zoom",
+                "status": "unavailable",
+                "reason": "The bundled renderer does not control or verify browser zoom.",
+            }
         stored.update(
             evidence_manifest={"capture": {"path": capture.name, "sha256": hashlib.sha256(capture.read_bytes()).hexdigest()}},
             source_sha256={item: "a" * 64 for item in items},
             rubric_sha256=hashlib.sha256((run / "rubric.json").read_bytes()).hexdigest(),
             adoption_checks={item: {tier: {"status": "pass", "evidence": ["capture"]}
                                    for tier in ("tier1", "tier2")} for item in items},
-            target_profiles={
-                "decision": rubric["target_platform_decision"],
-                "profiles": {"laptop": 1280, "desktop": 1920, "wide": 2560},
-                "widths": [1280, 1920, 2560],
-                "reflow": {"width": 320, "label": "zoom/reflow (not phone)"},
-                "quality_checks": {"semantic_control_parity": True},
-            },
+            target_profiles=target_profiles,
         )
         (folder / "round.json").write_text(json.dumps(stored))
         return run
@@ -250,6 +258,50 @@ class AdoptionTest(unittest.TestCase):
         self.assertIn("| A | visual | typography | 8.00 | 77.78 | 5 |", report)
         self.assertIn("| A | visual | 77.78 |", report)
         self.assertIn("WINNER p-A", report)
+
+    def test_declared_real_zoom_blocks_adoption_without_separately_verified_evidence(self):
+        def mutate(rubric, meta, sheets):
+            rubric["desktop_zoom"] = {"percentages": [100, 125, 150, 200]}
+        report = self.report(self.adoption_run(mutate=mutate))
+        self.assertIn("real desktop zoom evidence is unavailable or unverified", report)
+        self.assertIn("NOT_ADOPTABLE", report)
+
+    def test_css_viewport_evidence_cannot_be_relabelled_as_real_browser_zoom(self):
+        run = self.adoption_run()
+        rubric_path = run / "rubric.json"
+        rubric = json.loads(rubric_path.read_text())
+        rubric["desktop_zoom"] = {"percentages": [100, 125, 150, 200]}
+        rubric_path.write_text(json.dumps(rubric))
+        round_path = run / "round-1/round.json"
+        meta = json.loads(round_path.read_text())
+        meta["rubric_sha256"] = hashlib.sha256(rubric_path.read_bytes()).hexdigest()
+        meta["target_profiles"]["desktop_zoom"] = {
+            "percentages": [100, 125, 150, 200],
+            "evidence_type": "real_browser_zoom",
+            "status": "unavailable",
+            "reason": "The bundled renderer does not control or verify browser zoom.",
+        }
+        capture = meta["evidence_manifest"]["capture"]
+        meta["evidence_manifest"]["css-viewport"] = {
+            **capture, "evidence_type": "css_viewport",
+            "percentages": [100, 125, 150, 200], "source_sha256": "a" * 64,
+        }
+        for item in meta["items"]:
+            meta["adoption_checks"][item]["desktop_zoom"] = {
+                "status": "pass", "evidence": ["css-viewport"],
+            }
+        round_path.write_text(json.dumps(meta))
+        report = self.report(run)
+        self.assertIn("real desktop zoom evidence does not match the declared scope or source", report)
+
+        meta = json.loads(round_path.read_text())
+        for item in meta["items"]:
+            meta["adoption_checks"][item]["desktop_zoom"] = {
+                "status": "pass", "evidence": [[]],
+            }
+        round_path.write_text(json.dumps(meta))
+        report = self.report(run)
+        self.assertIn("real desktop zoom evidence is unavailable or unverified", report)
 
     def test_relative_winner_can_be_not_adoptable(self):
         report = self.report(self.adoption_run((7, 7)))

@@ -1,0 +1,15 @@
+{
+  "attempt_id": 1,
+  "decision": "keep",
+  "reason": "Both illustrative target scores rose by the predeclared one point, with full synthetic check coverage and no task-click regression.",
+  "before_artifacts": {
+    "source_ref": "6c67812f139c681fa48d26eafc13985be0bbd3cff49269f5df8ad690ff636be1",
+    "scores_ref": "b2e468e984d6e76cc46a2443aca8a8c870b13a43a04ba074ed0aa5556886a663",
+    "checks_ref": "36665c025a7a11cdf2683e11a472b13edfa6d808d2bc155d3a57dc4234894675"
+  },
+  "after_artifacts": {
+    "source_ref": "f39c09d220f3f7af3f0b2a9467f3b170a9b665c4348bbeceaeff2c8529bea441",
+    "scores_ref": "587c97036d01319fb6c20a94d15ab50b21d236738d424b3bf5047cd168165e34",
+    "checks_ref": "74cfc3eb636d5bf1168a8bee598f134bd5e878013ded3a07aadaa8b69e0252e6"
+  }
+}

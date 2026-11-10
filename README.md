@@ -31,13 +31,19 @@ Generator self-assessment does not count as a council vote.
 The [quality contract](docs/design-quality-contract.md) records the bounded
 council, coverage map, scoring formula, evidence rules and limitations.
 The total is expert judgment, not human usability or accessibility certification.
+The project goal is an anchored 9/10 across a selected 80-90% of declared
+measurement points. Keep every point in the denominator; unknown evidence
+remains missing, not a 9. This is a goal, not an achieved result.
+Reports distinguish an explicitly selected subset from an all-points claim.
+An unassessed point cannot be dropped from the denominator.
 
 ## Improve an existing prototype
 
 Use the [refinement loop](.github/skills/ui-prototype-council/SKILL.md#iterative-refinement-loop),
 not one large edit followed by a before/after score.
 First declare the project-owned target, iteration cap, no-gain limit and meaningful
-gain. Keep conditions fixed and record every attempt in the
+gain. An increment can test a bounded multi-dimension hypothesis or compare distinct
+alternatives. Keep conditions fixed and record every attempt in the
 [iteration ledger](docs/design-quality-contract.md#iteration-ledger).
 
 Illustration only; these scores are synthetic, not council or usability results:
@@ -50,9 +56,10 @@ Illustration only; these scores are synthetic, not council or usability results:
    Re-score typography and affected neighbors. If the declared gain is observed
    (for example 6 to 7) with no regression or missing coverage, provisionally keep
    and log it. Shared-token changes need a documented impact assessment.
-4. **Next attempt and revert:** make and measure only the next small change.
-   If it introduces a mobile overflow, revert only that attempt, preserve its
-   evidence and verify the preceding accepted source. A higher score cannot offset it.
+4. **Next attempt and revert:** make and measure only the next declared change.
+   If it introduces an overflow or another new finding, revert only that attempt,
+   preserve its evidence and verify the preceding accepted source. A higher score
+   cannot offset it.
 
 Do not start the next increment before measurement and keep/revert are recorded.
 Stop at a provisional target, the no-gain limit or the iteration cap; stop blocked
@@ -60,7 +67,10 @@ if evidence or restoration cannot be verified. Then obtain one fresh full
 council/adoption review when unblocked. Self-scores can guide edits, not acceptance.
 The [council record](docs/design-quality-contract.md#refinement-council-record)
 explains the evidence and execution safeguards added to this loop.
-The ledger format is documented; no ledger validator or `iterate.py` tool is bundled.
+The bundled [`iterations.py`](.github/skills/ui-prototype-council/iterations.py)
+validates and reports a hash-bound ledger. Run its
+[synthetic comparison example](docs/examples/refinement/README.md) with two
+materially different page layouts and a held-out error task.
 
 ## Checks
 

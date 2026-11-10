@@ -179,6 +179,18 @@ A changed applicability decision needs fresh evidence and review.
 Critical exclusions require particular human scrutiny.
 The script validates declaration shape, not the truth of the reason.
 
+The project goal is to reach an anchored 9/10 on a selected 80-90% of the
+declared measurement points. With the default 23-point catalogue, that means
+at least 19 points at 80%, or 21 at 90%. Keep the full denominator in reports.
+An unassessed or unsupported point remains visible and does not count as a 9.
+This is a project goal, not an achieved result, adoption threshold or usability
+claim. Record the chosen fraction and selected points before measurement.
+The report labels a result `all_declared_points` only when every declared point
+is selected. Otherwise, it labels the result `selected_subset` and lists the
+excluded points. A subset claim is not an overall claim; exclusions remain in
+the full denominator. Never exclude a point because its evidence is unavailable
+or unassessed. An unassessed selected point remains counted and below the goal.
+
 ## Gate evidence
 
 For version 3, declare gate results per blind item in `round.json`:
@@ -222,9 +234,11 @@ Do not recalculate historical scores as if missing dimensions had been assessed.
 
 ## Iterative refinement
 
-Selection compares alternatives. Refinement improves one existing prototype through
-separate measured increments. Neither process implements a product interface.
-Do not replace several measured increments with a batch edit and one final check.
+Selection compares alternatives. Refinement can measure a bounded coherent redesign
+or compare distinct alternatives through declared attempts. Neither process
+implements a product interface. Hold the task, state, theme, viewport and check
+scope fixed for every candidate. Do not combine unmeasured changes or omit a
+required state after editing.
 
 Before editing, freeze the rubric and adoption rationale, fixture, check commands,
 tool versions, target profiles, themes, states, tasks and budgets in a run contract.
@@ -298,103 +312,66 @@ An independent reviewer, blind to before/after order, can strengthen subjective
 progress evidence where the project requires it. This does not require a full
 council for every increment. Final acceptance always needs the fresh review below.
 
-### Iteration ledger
+### Machine-validated iteration ledger
 
-Use a project-local `iterations.json` with this envelope:
+Use the bundled `iterations.py` with the version 1 `iterations.json` format.
+The [synthetic example](examples/refinement/README.md) contains two materially
+different layouts, fixed browser checks, a held-out task, a multi-dimension
+hypothesis and a provisional keep.
 
-| Field | Required contents |
-|---|---|
-| `format_version` | `1`, identifying this documented format |
-| `contract_ref` | Frozen run contract, including rubric, target rationale, conditions, caps and minimum gains |
-| `artifacts` | Reference ID to `{path, sha256}` for source snapshots, inputs, reports, scores and captures |
-| `baseline` | Source, full checks, complete dimension assessment and evidence references before editing |
-| `iterations` | Completed attempt records in order, as illustrated below |
-| `stop` | `null` while running; otherwise reason, retained source and final-review status/reference |
+The ledger freezes a `scope_id`, the complete point denominator and selected
+80-90% goal, required scenarios, task budgets, feasibility statement, limits
+and recorded time. Every scenario names its theme, viewport, state and evidence
+type. A source-manifest artifact binds its build ID and the hashes of page
+sources and inputs. Baseline and after score/check artifacts bind their own
+source and build identity. A build may change between attempts; the declared
+scope and coverage may not.
 
-Use unique positive sequential attempt IDs.
-Reserve each ID in an immutable proposal before editing; that starts a counted attempt.
-If interrupted before a complete decision is recorded, preserve the current state,
-record that attempt as blocked and reconcile it before any further increment.
-Do not silently discard or retry it under a new ID.
-Every artifact reference must resolve to preserved bytes with a verified SHA-256
-digest. Check records must identify full coverage and actual pass/fail/incomplete
-status, not only finding counts. Score records identify reviewer provenance,
-dimensions assessed, reasons, evidence status and references.
-Each dimension score also records `assessment` (`reassessed` or `carried`),
-`assessed_attempt` (baseline is `0`) and `assessed_source_ref`.
-Retain before and after reviewer provenance separately in their score artifacts.
-Carried entries preserve their real last-assessed source and evidence; a new
-iteration ID must not make an old score appear fresh.
-Missing required observations have null scores, never an assumed zero or midpoint.
-Record each raw-score delta as `after - before`; do not combine incomparable reviews.
+Each attempt has a sequential ID, a named hypothesis, target dimensions and
+positive per-dimension gains. A hash-bound proposal must declare these before
+editing. Its after-score record must contain every denominator point. A null
+score has an explicit missing-evidence status. A 9 or 10 needs its rubric anchor,
+reason and evidence. The report shows numerator, full denominator, every point's
+change, missing evidence, reviewer kind, attempt count, recorded elapsed/review
+time, findings and scenario coverage. Unknown time remains null.
+The goal report states whether its claim covers all declared points or an
+explicitly selected subset, lists the selected count and exclusions, and keeps
+the full declared denominator. An unassessed selected point is listed as
+unassessed and below goal; missing evidence does not remove a point from either
+the denominator or the selected scope.
 
-For example, one completed record in `iterations` has this shape.
-The names and numbers are synthetic, not a measured result or default policy;
-reference IDs must resolve in the run's `artifacts` map:
+The check record includes actual command strings, exit codes, check status,
+scenario outcomes, finding identities/severities and task clicks. A passing
+keep needs every required scenario and command to pass, every task to pass
+without a click increase, no new or worsened finding identity, no score loss,
+and the full expected gain for each target dimension. Unknown or unavailable
+evidence, a command failure, changed coverage or a task-budget regression blocks
+a keep. Reverts require a source-hash restoration record; the tool never restores
+files. A blocked attempt must be last.
 
-```json
-{
-  "id": 1,
-  "hypothesis": "One heading scale will make the reading hierarchy clearer.",
-  "proposal_ref": "attempt-1/proposal-before-edit",
-  "patch_ref": "attempt-1/patch",
-  "impact_ref": "attempt-1/impact-assessment",
-  "target_dimensions": ["typography"],
-  "target_checks": [],
-  "affected_dimensions": [
-    "hierarchy", "spacing_density", "layout", "responsive_behavior",
-    "text_resilience", "accessibility"
-  ],
-  "files_changed": ["DESIGN.md", "tokens.css"],
-  "before": {
-    "source_ref": "baseline/source",
-    "checks_ref": "baseline/checks",
-    "scores_ref": "baseline/scores",
-    "evidence": ["baseline/captures"]
-  },
-  "after": {
-    "source_ref": "attempt-1/source",
-    "checks_ref": "attempt-1/checks",
-    "scores_ref": "attempt-1/scores",
-    "evidence": ["attempt-1/captures"]
-  },
-  "dimension_deltas": {
-    "typography": {"before": 6, "after": 7, "delta": 1},
-    "hierarchy": {"before": 7, "after": 7, "delta": 0},
-    "spacing_density": {"before": 7, "after": 7, "delta": 0},
-    "layout": {"before": 7, "after": 7, "delta": 0},
-    "responsive_behavior": {"before": 7, "after": 7, "delta": 0},
-    "text_resilience": {"before": 7, "after": 7, "delta": 0},
-    "accessibility": {"before": 7, "after": 7, "delta": 0}
-  },
-  "reviewer_kind": "generator",
-  "regressions": [],
-  "decision": "keep",
-  "provisional": true,
-  "reason": "The declared one-point gain was observed, with no detected regression.",
-  "retained_source_ref": "attempt-1/source",
-  "restore_verification_ref": null
-}
-```
+`report` separates generator self-assessment, independent qualified review,
+human review, assistive-technology evidence and automated check observations.
+These are declared labels. Different labels do not establish reviewer
+independence or qualification. Automated findings are grouped by identity and
+profile; counts alone do not decide whether a change is safe.
 
-`decision` is `keep`, `revert` or `blocked`. For `revert`, retain the rejected
-`after` evidence and reference the verified preceding accepted source.
-Its `restore_verification_ref` must resolve to the file/hash comparison and actual
-restoration result; it is null when no restoration was needed.
-For `blocked`, record the missing observation or failed restoration explicitly;
-do not start another attempt. Use null for unmeasured values or an unverified
-retained source, and preserve any failed restoration report. Do not invent completed
-measurements to fill the record. The proposal artifact records the hypothesis and
-expected gain before edits begin. Append completed attempt records without
-rewriting earlier entries or evidence. The next `before` must reference the
-previous decision's verified retained source.
-Preserve completed ledger revisions as immutable snapshots so an earlier record
-cannot be silently replaced. Record the after-measurement artifacts before deciding.
+The verifier rejects changed or missing artifact bytes, source inputs, stale
+scores, post-decision score/check/source changes, missing points, changed
+scope/build evidence, new findings, failed commands, unknown check status and
+invalid stop reasons. Each decision artifact freezes the before/after hashes.
+It does not infer a per-attempt gain model. `infeasible` is accepted only when
+a hash-bound immutable score ceiling proves that every selected point is below
+the target, with explicit assumptions. Multi-dimension or unbounded-gain cases
+remain `unknown` unless a valid proof is supplied.
 
-This is a documented format, not a bundled ledger validator or comparison CLI.
-Parse JSON, verify references/digests and review the comparison and decision rules
-with project-owned checks. The existing browser report output is not this ledger.
-Do not claim an automated regression verdict merely because the JSON parses.
+SHA-256 binds the bytes currently referenced; it does not prove when they were
+recorded, that the evidence is true, or that reviewer labels are genuine.
+A person who can rewrite a ledger can also rewrite its hashes. Do not claim that
+a freely rewritten hash chain proves historical authenticity. Preserve each
+decision's ledger and evidence in a trusted, immutable review record or commit,
+and record that external trust anchor. The validator does not create that anchor
+or establish edit chronology. Its `recorded_before_edit` proposal flag is a
+declared assertion, not a trusted timestamp.
 
 ### Stops and final adoption
 
@@ -472,6 +449,16 @@ The independent 320 CSS pixel reflow check always runs.
 It models web zoom/reflow, not a required phone target.
 These are CSS viewports, not proof of actual device or touch behavior.
 Set `renderer` to `web`. Native renderers fail before preparation creates output.
+
+An optional `desktop_zoom` object declares real browser zoom percentages, for
+example `[100, 125, 150, 200]`. It requires the desktop profile and records
+`evidence_type: real_browser_zoom`. The bundled renderer does not execute real
+browser zoom, so each declared real-zoom scenario is marked `unavailable`.
+This is not a pass. A CSS-width change, device scale factor or 320-pixel reflow
+must not be relabelled as real browser zoom. If a project requires these steps,
+obtain separate real-zoom evidence before keeping or adopting a candidate.
+Explicitly disabling the mobile profile does not remove desktop zoom or reflow
+from the declared scope.
 
 The optional `quality_checks` object supports:
 

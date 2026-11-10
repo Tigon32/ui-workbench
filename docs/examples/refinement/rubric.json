@@ -1,0 +1,13 @@
+{
+  "target_platforms": {
+    "mobile": false,
+    "tablet": false,
+    "laptop": false,
+    "desktop": true,
+    "wide": false
+  },
+  "target_platform_decision": "This fixture compares desktop browser pages only. Mobile-device behavior is out of scope.",
+  "quality_checks": {
+    "semantic_control_parity": true
+  }
+}

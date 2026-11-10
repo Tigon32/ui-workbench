@@ -1,0 +1,8 @@
+[
+  {
+    "name": "open-held-out-error",
+    "clicks": ["Open held-out error case"],
+    "goal": "The item cannot be displayed. Its data remains unchanged.",
+    "max_clicks": 1
+  }
+]

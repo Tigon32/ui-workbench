@@ -69,8 +69,10 @@ def load_rubric(path):
         widths[name] = width
 
     quality = _validate_quality(rubric.get("quality_checks", {}))
+    zoom = (_validate_desktop_zoom(rubric["desktop_zoom"], platforms)
+            if "desktop_zoom" in rubric else None)
     digest = hashlib.sha256(raw).hexdigest()
-    return {
+    result = {
         "digest": digest,
         "decision": decision.strip(),
         "profiles": {name: widths[name] for name in enabled},
@@ -79,6 +81,35 @@ def load_rubric(path):
         "reflow_label": "zoom/reflow (not phone)",
         "quality_checks": quality,
     }
+    if zoom is not None:
+        result["desktop_zoom"] = zoom
+    return result
+
+
+def _validate_desktop_zoom(value, platforms):
+    if not isinstance(value, dict) or set(value) - {"percentages"}:
+        raise RubricError("desktop_zoom must contain only percentages")
+    percentages = value.get("percentages", [])
+    if not isinstance(percentages, list) or len(percentages) > 10:
+        raise RubricError("desktop_zoom.percentages must be a list of at most 10 zoom values")
+    if percentages and not platforms["desktop"]:
+        raise RubricError("desktop_zoom requires the desktop target profile")
+    if (any(type(item) is not int or not 100 <= item <= 300 for item in percentages)
+            or len(set(percentages)) != len(percentages)
+            or percentages != sorted(percentages)
+            or (percentages and (percentages[0] != 100 or len(percentages) < 2))):
+        raise RubricError(
+            "desktop_zoom.percentages must contain 100 and at least one intermediate zoom, "
+            "as unique ascending integers from 100 to 300"
+        )
+    result = {
+        "percentages": percentages,
+        "evidence_type": "real_browser_zoom",
+        "status": "unavailable" if percentages else "not_declared",
+        "reason": ("The bundled renderer does not control or verify browser zoom."
+                   if percentages else "No real-browser zoom percentages were declared."),
+    }
+    return result
 
 
 def _validate_quality(value):
@@ -130,7 +161,7 @@ def _validate_quality(value):
 
 def metadata(profiles):
     """Return stable, explicit profile fields suitable for round metadata."""
-    return {
+    result = {
         "decision": profiles["decision"],
         "profiles": profiles["profiles"],
         "widths": profiles["widths"],
@@ -140,3 +171,6 @@ def metadata(profiles):
         },
         "quality_checks": profiles["quality_checks"],
     }
+    if "desktop_zoom" in profiles:
+        result["desktop_zoom"] = profiles["desktop_zoom"]
+    return result

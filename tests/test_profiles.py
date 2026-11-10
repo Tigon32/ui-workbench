@@ -106,6 +106,37 @@ class ProfilesTest(unittest.TestCase):
             with self.assertRaisesRegex(PROFILES.RubricError, "unsupported"):
                 PROFILES.load_rubric(self.write_rubric(temp, rubric))
 
+    def test_desktop_zoom_is_distinct_from_css_reflow_and_is_never_claimed_as_run(self):
+        rubric = self.base()
+        rubric["target_platforms"]["mobile"] = False
+        rubric["desktop_zoom"] = {"percentages": [100, 125, 150, 200]}
+        with tempfile.TemporaryDirectory() as temp:
+            result = PROFILES.load_rubric(self.write_rubric(temp, rubric))
+            declared = PROFILES.metadata(result)
+        self.assertEqual(declared["reflow"], {
+            "width": 320, "label": "zoom/reflow (not phone)",
+        })
+        self.assertEqual(declared["desktop_zoom"]["percentages"], [100, 125, 150, 200])
+        self.assertEqual(declared["desktop_zoom"]["evidence_type"], "real_browser_zoom")
+        self.assertEqual(declared["desktop_zoom"]["status"], "unavailable")
+
+    def test_rejects_zoom_without_desktop_or_without_intermediate_steps_in_order(self):
+        with tempfile.TemporaryDirectory() as temp:
+            rubric = self.base()
+            rubric["target_platforms"]["desktop"] = False
+            rubric["desktop_zoom"] = {"percentages": [100, 150]}
+            with self.assertRaisesRegex(PROFILES.RubricError, "requires the desktop"):
+                PROFILES.load_rubric(self.write_rubric(temp, rubric))
+
+            rubric = self.base()
+            rubric["desktop_zoom"] = {"percentages": [150, 100]}
+            with self.assertRaisesRegex(PROFILES.RubricError, "ascending"):
+                PROFILES.load_rubric(self.write_rubric(temp, rubric))
+
+            rubric["desktop_zoom"] = {"percentages": [100]}
+            with self.assertRaisesRegex(PROFILES.RubricError, "intermediate zoom"):
+                PROFILES.load_rubric(self.write_rubric(temp, rubric))
+
 
 if __name__ == "__main__":
     unittest.main()

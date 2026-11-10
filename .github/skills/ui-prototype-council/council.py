@@ -259,6 +259,23 @@ def adoption_report(rubric, dims, contestants, valid, stats, meta):
                         or any(not isinstance(ref, str) or ref not in meta["evidence_manifest"]
                                for ref in check["evidence"])):
                     reasons.append(f"{tier} evidence is failed or unverified")
+            zoom = meta.get("target_profiles", {}).get("desktop_zoom")
+            if zoom and zoom.get("percentages"):
+                check = checks.get("desktop_zoom", {}) if isinstance(checks, dict) else {}
+                refs = check.get("evidence", []) if isinstance(check, dict) else []
+                if (not isinstance(check, dict) or check.get("status") != "pass"
+                        or not isinstance(refs, list) or not refs
+                        or any(not isinstance(ref, str) or ref not in meta["evidence_manifest"]
+                               for ref in refs)):
+                    reasons.append("real desktop zoom evidence is unavailable or unverified")
+                elif any(
+                    not isinstance(meta["evidence_manifest"][ref], dict)
+                    or meta["evidence_manifest"][ref].get("evidence_type") != "real_browser_zoom"
+                    or meta["evidence_manifest"][ref].get("percentages") != zoom["percentages"]
+                    or meta["evidence_manifest"][ref].get("source_sha256") != meta["source_sha256"][item]
+                    for ref in refs
+                ):
+                    reasons.append("real desktop zoom evidence does not match the declared scope or source")
         total = "unavailable" if s["mean"] is None else fmt(design_total(s["mean"]))
         status = "NOT_ADOPTABLE" if reasons else "ADOPTABLE"
         outcomes[meta["reveal"][item]] = status
@@ -395,6 +412,12 @@ def score_round(rubric, dims, round_dir, previous_keep):
                   f"Declared browser targets: {meta['target_profiles']['profiles']}.",
                   "The independent 320 CSS pixel view is zoom/reflow, not a phone qualification.", "",
                   "| Item | Source page SHA-256 |", "|---|---|"]
+        zoom = meta["target_profiles"].get("desktop_zoom")
+        if zoom and zoom["percentages"]:
+            lines.insert(-3, (
+                f"Declared real browser zoom: {zoom['percentages']}; "
+                f"bundled renderer status: {zoom['status']}."
+            ))
         lines += [f"| {item} | `{meta['source_sha256'][item]}` |" for item in contestants]
         lines += [""]
 
