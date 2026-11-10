@@ -3,10 +3,13 @@
 import hashlib
 import importlib.util
 import json
+import re
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -216,6 +219,55 @@ class IterationLedgerTest(unittest.TestCase):
         artifact_path.write_bytes(encoded)
         item["sha256"] = hashlib.sha256(encoded).hexdigest()
 
+    def png_capture(self, color, width=2, height=2):
+        def chunk(kind, payload):
+            body = kind + payload
+            return (struct.pack(">I", len(payload)) + body
+                    + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF))
+
+        rows = (b"\x00" + bytes(color) * width) * height
+        return (b"\x89PNG\r\n\x1a\n"
+                + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(rows))
+                + chunk(b"IEND", b""))
+
+    def add_visual_evidence(self, ledger):
+        attempt = ledger["iterations"][0]
+        before_capture = self.artifact(
+            "attempt-1/before.png",
+            self.png_capture((20, 40, 60, 255), width=144, height=400), json_file=False)
+        after_capture = self.artifact(
+            "attempt-1/after.png",
+            self.png_capture((60, 40, 20, 255), width=400, height=144), json_file=False)
+        visual_ref = self.artifact("attempt-1/visual.json", {
+            "schema_version": 1,
+            "coordinate_space": "normalized",
+            "attempt_id": 1,
+            "before_source_ref": attempt["before"]["source_ref"],
+            "after_source_ref": attempt["after"]["source_ref"],
+            "before_capture_ref": before_capture,
+            "before_capture_sha256": self.artifacts[before_capture]["sha256"],
+            "after_capture_ref": after_capture,
+            "after_capture_sha256": self.artifacts[after_capture]["sha256"],
+            "changes": [{
+                "id": "header",
+                "label": "Header hierarchy",
+                "description": "Moved the primary action beside the heading.",
+                "before": {"start": {"x": 0.1, "y": 0.2},
+                           "end": {"x": 0.5, "y": 0.3}},
+                "after": {"start": {"x": 0.1, "y": 0.2},
+                          "end": {"x": 0.6, "y": 0.3}},
+            }],
+        })
+        attempt["visual_ref"] = visual_ref
+        if ledger.get("format_version") == 2:
+            attempt["actual_evidence"].extend(
+                [visual_ref, before_capture, after_capture])
+        self.refresh_decision(ledger)
+        (self.root / "iterations.json").write_text(
+            json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+        return visual_ref
+
     def create_v2_ledger(self):
         path, ledger = self.create_ledger()
         ledger["format_version"] = 2
@@ -402,6 +454,176 @@ class IterationLedgerTest(unittest.TestCase):
         self.assertEqual(report["findings"]["recurring_observation_identities"], 1)
         self.assertEqual(report["findings"]["recurring_finding_identities"], 1)
         self.assertEqual(report["progress_by_reviewer_kind"]["generator_self_assessment"], 1)
+
+    def test_visual_evidence_and_per_attempt_score_changes_are_reported(self):
+        path, ledger = self.create_ledger()
+        visual_ref = self.add_visual_evidence(ledger)
+
+        verified = ITERATIONS.verify(path)
+        result = ITERATIONS.report(verified)
+        attempt = result["attempt_reports"][0]
+        self.assertEqual(attempt["visual_evidence"]["status"], "provided")
+        self.assertEqual(attempt["visual_evidence"]["reference"], visual_ref)
+        self.assertEqual(attempt["visual_evidence"]["changes"][0]["id"], "header")
+        self.assertEqual(attempt["score_changes"]["p1"]["before_score"], 8)
+        self.assertEqual(attempt["score_changes"]["p1"]["after_score"], 9)
+        self.assertEqual(attempt["score_changes"]["p1"]["delta"], 1)
+        self.assertTrue(attempt["score_changes"]["p1"]["targeted"])
+        self.assertEqual(attempt["score_changes"]["p1"]["expected_gain"], 1)
+        self.assertEqual(attempt["score_changes"]["p1"]["gain_status"], "met")
+        self.assertEqual(attempt["visual_evidence"]["before_capture_sha256"],
+                         ledger["artifacts"]["attempt-1/before.png"]["sha256"])
+        self.assertEqual(attempt["visual_evidence"]["before_capture_dimensions"],
+                         {"width": 144, "height": 400})
+        rendered = ITERATIONS.html_report(verified, attempt_id=1)
+        self.assertIn("data:image/png;base64,", rendered)
+        self.assertIn('marker-end="url(#arrow-1-before-1)"', rendered)
+        self.assertIn('viewBox="0 0 144 400"', rendered)
+        self.assertIn('viewBox="0 0 400 144"', rendered)
+        self.assertNotIn('preserveAspectRatio="none"', rendered)
+        self.assertIn('<circle cx="17.532" cy="62.000"', rendered)
+        self.assertIn("Header hierarchy", rendered)
+        self.assertIn("Moved the primary action beside the heading.", rendered)
+        self.assertIn("What changed in the scores", rendered)
+        self.assertIn("Target +1 (met)", rendered)
+        self.assertIn('mobile-cell-label">Delta</span>', rendered)
+        self.assertIn("Reviewer labels are declared provenance", rendered)
+        self.assertIn("Attempt 1 · generator_self_assessment", rendered)
+        self.assertIn("Not recorded. A kept attempt is provisional progress", rendered)
+        self.assertIn("Keep (provisional)", rendered)
+        self.assertIn('aria-describedby="changes-1"', rendered)
+
+    def test_html_report_escapes_ledger_text_and_marks_missing_visual_evidence(self):
+        path, ledger = self.create_ledger()
+        attempt = ledger["iterations"][0]
+        injection = '<img src=x onerror="alert(1)">'
+        attempt["hypothesis"] = injection
+        attempt["reason"] = injection
+        self.rewrite_json_artifact(
+            ledger, attempt["proposal_ref"], lambda data: data.update({"hypothesis": injection}))
+        self.refresh_decision(ledger)
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+
+        rendered = ITERATIONS.html_report(ITERATIONS.verify(path))
+        self.assertIn("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;", rendered)
+        self.assertNotIn(injection, rendered)
+        self.assertIn("No captures or annotations were supplied", rendered)
+        self.assertIn("No arrows were inferred", rendered)
+        self.assertIn('<h3 id="visual-1">No captures supplied</h3>', rendered)
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "attempt 2 does not exist"):
+            ITERATIONS.html_report(ITERATIONS.verify(path), attempt_id=2)
+
+    def test_html_report_cap_checks_embedded_capture_total(self):
+        path, ledger = self.create_ledger()
+        self.add_visual_evidence(ledger)
+        original_limit = ITERATIONS.MAX_HTML_REPORT_BYTES
+        ITERATIONS.MAX_HTML_REPORT_BYTES = 100
+        try:
+            with self.assertRaisesRegex(ITERATIONS.LedgerError, "embedded captures exceed"):
+                ITERATIONS.html_report(ITERATIONS.verify(path))
+        finally:
+            ITERATIONS.MAX_HTML_REPORT_BYTES = original_limit
+
+    def test_html_report_cap_checks_aggregate_capture_pixels(self):
+        path, ledger = self.create_ledger()
+        self.add_visual_evidence(ledger)
+        original_limit = ITERATIONS.MAX_HTML_REPORT_PIXELS
+        ITERATIONS.MAX_HTML_REPORT_PIXELS = 100_000
+        try:
+            with self.assertRaisesRegex(ITERATIONS.LedgerError, "100,000-pixel"):
+                ITERATIONS.html_report(ITERATIONS.verify(path))
+        finally:
+            ITERATIONS.MAX_HTML_REPORT_PIXELS = original_limit
+
+    def test_png_capture_pixel_cap_rejects_extreme_dimensions(self):
+        reference = self.artifact(
+            "oversized.png", self.png_capture((20, 40, 60, 255)), json_file=False)
+        item = self.artifacts[reference]
+        capture_path = self.root / item["path"]
+        data = bytearray(capture_path.read_bytes())
+        data[16:24] = struct.pack(">II", 50_000, 900)
+        chunk = data[12:16] + data[16:29]
+        data[29:33] = struct.pack(">I", zlib.crc32(chunk) & 0xFFFFFFFF)
+        capture_path.write_bytes(data)
+        item["sha256"] = hashlib.sha256(data).hexdigest()
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "excessive dimensions"):
+            ITERATIONS._capture_png(self.root, self.artifacts, reference)
+
+    def test_empty_visual_annotations_do_not_claim_arrows_in_alt_text(self):
+        path, ledger = self.create_ledger()
+        visual_ref = self.add_visual_evidence(ledger)
+        self.rewrite_json_artifact(ledger, visual_ref, lambda data: data.update({"changes": []}))
+        self.refresh_decision(ledger)
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+        rendered = ITERATIONS.html_report(ITERATIONS.verify(path), attempt_id=1)
+        self.assertIn('alt="Before capture; no visual annotations were supplied"', rendered)
+        self.assertIn("No changes were annotated in this attempt", rendered)
+        self.assertNotIn('marker-end="url(#arrow-1-before-1)"', rendered)
+
+    def test_short_edge_arrowhead_stays_clear_of_numbered_badge(self):
+        path, ledger = self.create_ledger()
+        visual_ref = self.add_visual_evidence(ledger)
+        self.rewrite_json_artifact(ledger, visual_ref, lambda data: (
+            data["changes"][0]["before"].update({
+                "start": {"x": 0, "y": 0.5},
+                "end": {"x": 0.01, "y": 0.5},
+            })
+        ))
+        self.refresh_decision(ledger)
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+        attempt = ITERATIONS.report(ITERATIONS.verify(path))["attempt_reports"][0]
+        overlay = ITERATIONS._render_arrow_overlay(attempt["visual_evidence"], "before", 1)
+        line = re.search(r'<line x1="[\d.]+" y1="[\d.]+" x2="([\d.]+)"', overlay)
+        marker = re.search(r'<marker id="arrow-1-before-1" markerWidth="([\d.]+)"', overlay)
+        badge = re.search(
+            r'<circle cx="([\d.]+)" cy="[\d.]+" r="([\d.]+)" '
+            r'class="arrow-number" stroke-width="([\d.]+)"',
+            overlay,
+        )
+        self.assertIsNotNone(line)
+        self.assertIsNotNone(marker)
+        self.assertIsNotNone(badge)
+        badge_right = float(badge[1]) + float(badge[2]) + float(badge[3]) / 2
+        arrowhead_start = float(line[1]) - float(marker[1])
+        self.assertGreater(arrowhead_start, badge_right)
+
+    def test_visual_evidence_rejects_out_of_range_arrows_and_changed_capture_digests(self):
+        path, ledger = self.create_ledger()
+        visual_ref = self.add_visual_evidence(ledger)
+        self.rewrite_json_artifact(ledger, visual_ref, lambda data: (
+            data["changes"][0]["after"]["end"].update({"x": 1.01})
+        ))
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "invalid normalized after end"):
+            ITERATIONS.verify(path)
+
+        path, ledger = self.create_ledger()
+        self.add_visual_evidence(ledger)
+        capture = ledger["artifacts"]["attempt-1/before.png"]
+        capture_path = self.root / capture["path"]
+        capture_path.write_bytes(self.png_capture((90, 90, 90, 255)))
+        capture["sha256"] = hashlib.sha256(capture_path.read_bytes()).hexdigest()
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "capture digests do not match"):
+            ITERATIONS.verify(path)
+
+    def test_visual_evidence_rejects_corrupt_png_chunks_even_when_rehashed(self):
+        path, ledger = self.create_ledger()
+        visual_ref = self.add_visual_evidence(ledger)
+        capture_ref = "attempt-1/before.png"
+        capture = ledger["artifacts"][capture_ref]
+        capture_path = self.root / capture["path"]
+        corrupted = bytearray(capture_path.read_bytes())
+        corrupted[24] ^= 1
+        capture_path.write_bytes(corrupted)
+        capture["sha256"] = hashlib.sha256(corrupted).hexdigest()
+        self.rewrite_json_artifact(ledger, visual_ref, lambda data: data.update({
+            "before_capture_sha256": capture["sha256"],
+        }))
+        self.refresh_decision(ledger)
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "corrupt PNG chunk"):
+            ITERATIONS.verify(path)
 
     def test_v2_uses_project_goal_and_reports_overlapping_scopes_and_freshness(self):
         path, ledger = self.create_v2_ledger()
@@ -802,6 +1024,25 @@ class IterationLedgerTest(unittest.TestCase):
         )
         self.assertEqual(report.returncode, 0, report.stderr)
         self.assertEqual(json.loads(report.stdout)["goal"]["score"], 7)
+        html_path = self.root / "attempt-report.html"
+        rendered = subprocess.run(
+            [sys.executable, str(script), "html", str(path),
+             "--attempt", "1", "--output", str(html_path)],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        self.assertIn("HTML report written to", rendered.stdout)
+        document = html_path.read_text(encoding="utf-8")
+        self.assertIn("<!doctype html>", document)
+        self.assertIn("No captures or annotations were supplied", document)
+        original_ledger = path.read_bytes()
+        collision = subprocess.run(
+            [sys.executable, str(script), "html", str(path), "--output", str(path)],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertNotEqual(collision.returncode, 0)
+        self.assertIn("must not overwrite", collision.stderr)
+        self.assertEqual(path.read_bytes(), original_ledger)
 
     def test_all_point_goal_keeps_unassessed_points_in_overall_denominator(self):
         path, ledger = self.create_ledger()
@@ -947,6 +1188,13 @@ class IterationLedgerTest(unittest.TestCase):
             key: ledger["artifacts"][attempt["before"][key]]["sha256"]
             for key in ("source_ref", "scores_ref", "checks_ref")
         }
+        visual_ref = attempt.get("visual_ref")
+        if visual_ref is None:
+            record.pop("visual_ref", None)
+            record.pop("visual_sha256", None)
+        else:
+            record["visual_ref"] = visual_ref
+            record["visual_sha256"] = ledger["artifacts"][visual_ref]["sha256"]
         if ledger.get("format_version") == 2:
             record["attempt_summary"] = {
                 key: attempt[key] for key in (
@@ -955,6 +1203,11 @@ class IterationLedgerTest(unittest.TestCase):
                     "effort_minutes", "decision_actor", "decision_records",
                 )
             }
+            if visual_ref is not None:
+                record["attempt_summary"].update({
+                    "visual_ref": visual_ref,
+                    "visual_sha256": ledger["artifacts"][visual_ref]["sha256"],
+                })
         encoded = (json.dumps(record, sort_keys=True) + "\n").encode()
         decision_path.write_bytes(encoded)
         decision_artifact["sha256"] = hashlib.sha256(encoded).hexdigest()

@@ -176,6 +176,16 @@ def prepare(args):
                         browser.load(page.resolve().as_uri() + fragment, CAPTURE_STATE_WIDTH, "light", False)
                         browser.screenshot(out / f"state-{label}.png", full_page=True)
                 shutil.copyfile(design, out / "DESIGN.md")
+                references = {
+                    f"{ident}/{capture.name}": {
+                        "path": capture.name,
+                        "sha256": hashlib.sha256(capture.read_bytes()).hexdigest(),
+                    }
+                    for capture in sorted(out.glob("*.png"))
+                }
+                (out / "evidence-manifest.json").write_text(
+                    json.dumps({"references": references}, indent=2) + "\n",
+                    encoding="utf-8")
             version = browser.version
     finally:
         browser.close()

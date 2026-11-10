@@ -160,6 +160,11 @@ Missing required evidence makes the total unavailable and blocks adoption.
 An incomplete candidate comparison is `VOID`, with no elimination.
 Unassessed calibration evidence excludes that reviewer.
 Generator self-assessment can be recorded but never supplies a council vote.
+For rules version 3, each evidence reference must belong to the item being
+scored, using the `<blind-id>/<reference>` prefix. Older version-3 runs that
+used shared, unprefixed references will not verify under this item-local check.
+Keep those artifacts unchanged for historical audit; create and score a fresh
+run with item-prefixed references rather than rewriting old score sheets.
 
 Declare genuine not-applicable dimensions before scoring:
 
@@ -450,6 +455,63 @@ Use the bundled `iterations.py` to verify or report either format. The
 [synthetic comparison example](examples/refinement/README.md) contains two
 materially different layouts, fixed browser checks, a held-out task, a
 multi-dimension hypothesis and a provisional keep.
+
+An HTML attempt report can be generated with
+`iterations.py html <ledger> --attempt <id> --output <file.html>`. Omit
+`--attempt` to include every attempt in one report. The output is a standalone
+document: images are embedded, text is escaped, the score table reflows at
+narrow widths, and no external fonts, scripts or stylesheets are loaded.
+Each attempt puts its decision and rationale before its scorecard and visual
+evidence. Scores show before, after, delta, assessment/evidence status,
+evidence references, targeted points and whether each declared gain was met;
+incompatible comparisons are labelled rather than subtracted. The report
+states whether an independent final review exists and retains the limits on
+reviewer provenance and usability claims.
+
+Visual annotations are optional and are never inferred. An attempt's optional
+`visual_ref` points to a hash-bound JSON artifact with this exact shape:
+
+```json
+{
+  "schema_version": 1,
+  "coordinate_space": "normalized",
+  "attempt_id": 1,
+  "before_source_ref": "baseline/source.json",
+  "after_source_ref": "attempt-1/source.json",
+  "before_capture_ref": "attempt-1/before.png",
+  "before_capture_sha256": "<artifact SHA-256>",
+  "after_capture_ref": "attempt-1/after.png",
+  "after_capture_sha256": "<artifact SHA-256>",
+  "changes": [{
+    "id": "primary-action",
+    "label": "Primary action",
+    "description": "Moved the action beside the page heading.",
+    "before": {
+      "start": {"x": 0.1, "y": 0.2},
+      "end": {"x": 0.6, "y": 0.3}
+    },
+    "after": {
+      "start": {"x": 0.1, "y": 0.2},
+      "end": {"x": 0.7, "y": 0.3}
+    }
+  }]
+}
+```
+
+Coordinates are fractions of the corresponding capture's width and height in
+the range `[0, 1]`; each change requires separately authored before and after
+arrows. The renderer draws numbered red arrows on each capture and places the
+matching escaped description immediately below the pair, not over the captured
+content. Arrow geometry uses each capture's pixel dimensions, so full-page
+captures do not distort the arrows or number badges. Each PNG is size/dimension checked and bound by SHA-256 in the visual
+artifact; the attempt's decision record binds the visual artifact digest. In
+format 2, the visual JSON and both capture refs must also appear in
+`actual_evidence`. With no metadata, the report states that no captures or
+annotations were supplied. Empty annotations also get an explicit state. The
+validator limits each capture to 8 MiB and 40 million pixels, the aggregate
+captures in one HTML report to 40 million pixels, each complete HTML report to
+32 MiB, and accepts at most 100 annotations per attempt.
+Hashes establish byte identity, not capture truth or chronology.
 
 The format-1 ledger freezes a `scope_id`, the complete point denominator and
 its selected 80-90% goal, required scenarios, task budgets, feasibility

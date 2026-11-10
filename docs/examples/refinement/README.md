@@ -42,6 +42,9 @@ python3 .github/skills/ui-prototype-council/iterations.py verify \
   docs/examples/refinement/iterations.json
 python3 .github/skills/ui-prototype-council/iterations.py report \
   docs/examples/refinement/iterations.json
+python3 .github/skills/ui-prototype-council/iterations.py html \
+  docs/examples/refinement/iterations.json --attempt 1 \
+  --output refinement-attempt-1.html
 ```
 
 The report selects all five declared points, including unassessed
@@ -52,6 +55,13 @@ two scored points below 9 and one unassessed selected point, the generator
 reviewer kind, and an iteration-cap stop. Design elapsed time and review effort
 are unknown. The recorded 1.68 seconds is renderer execution time only. No
 adoption or independent review is claimed.
+
+The HTML command produces a self-contained per-attempt report. Because this
+synthetic compatibility ledger has no captures or visual annotations, the
+report explicitly says so rather than drawing speculative arrows. Format-2
+attempts can bind before/after PNG captures and their authored arrow
+coordinates through `visual_ref`; see the
+[refinement contract](../../design-quality-contract.md#machine-validated-iteration-ledger).
 
 To declare real desktop browser zoom, add for example:
 

@@ -145,7 +145,9 @@ Per round:
    drill-down and dialog states. A minimal default view hides the flow that reviewers
    must judge, so require generators to open those states from the URL fragment. Keep `sealed.json` out of every reviewer's context.
    Pass the same `--rubric RUN/rubric.json` to capture declared widths and record
-   the profile decisions and evidence digests.
+   the profile decisions and evidence digests. Give each reviewer only each item's
+   captures, `DESIGN.md` and `evidence-manifest.json`; never share `round.json` or
+   `sealed.json` before scoring.
 4. **Score independently.** Each reviewer gets a different seeded order and scores all
    items in one call, with the reviewer prompt below. No reviewer sees another's sheet.
    Save each sheet as `round-N/reviewer-<id>.json`.
@@ -239,6 +241,14 @@ Model calls and final review still require the authorization above.
 The [refinement contract](../../../docs/design-quality-contract.md#iterative-refinement)
 defines the ledger, comparison rules and terminal outcomes.
 Use [`iterations.py`](iterations.py) to verify or report the hash-bound ledger.
+Generate one standalone HTML report per attempt with
+`python3 iterations.py html <ledger> --attempt <id> --output <report.html>`.
+For each real before/after capture pair, record `visual_ref` using the schema
+in the [refinement contract](../../../docs/design-quality-contract.md#machine-validated-iteration-ledger).
+Bind both PNGs and the metadata as artifacts, write explicit normalized
+before/after arrow coordinates and nearby change descriptions, and include all
+three refs in format-2 `actual_evidence`. Never guess an annotation. If the
+attempt has no captures, the report must keep that absence explicit.
 Its keep gate checks full coverage, task budgets, finding identities, source and
 build identity, reviewer provenance and the declared target gains. A self-score
 is progress evidence only; it is not acceptance.
@@ -249,6 +259,11 @@ is progress evidence only; it is not acceptance.
 - **Weak:** **passes Tier 1 and Tier 2** and is weak only on the critical dimensions. For
   example, it signals approval, buries uncertainty or shows a total the brief forbids.
   A weak item that fails the mechanics is discarded before review and calibrates nothing.
+
+For rules version 3, every scored dimension on both calibration items must be assessed
+for a reviewer to qualify. Exclude genuinely non-applicable dimensions, with reasons,
+before scoring; do not assign guesses to complete calibration or remove dimensions after
+seeing the sheets. `council.py` reports which calibration dimensions were unassessed.
 
 `council.py` excludes a reviewer whose weighted score for strong minus weak is below the
 rubric's `calibration_margin`, and records the exclusion.
@@ -286,11 +301,14 @@ Return only: the folder, the gate output and three sentences on the direction.
 ```text
 You are one of several independent reviewers. You see no other reviewer's work.
 <rubric>{dimensions, each with anchors 3, 5, 7 and 9}</rubric>
-<items order="{seeded order}">{for each blind id: captures and its DESIGN.md rationale}</items>
+<items order="{seeded order}">{for each blind id: captures, its evidence-manifest.json
+reference IDs, and its DESIGN.md rationale}</items>
 Score only the rubric dimensions. Contrast, target size and focus are already decided;
 do not score them. For each item and dimension, write the reason first, citing what is
 visible in a named capture, then an integer from 1 to 10 against the anchors.
-Use only the supplied evidence reference IDs. If evidence cannot establish the
+Use only the exact reference IDs listed for that blind item; never cite another
+item's captures or design artifacts. The validator rejects cross-item citations.
+If evidence cannot establish the
 criterion, use a null score and not_assessed, blocked or unsupported status.
 Do not infer runtime, screen-reader or native behavior from a static image.
 Return JSON only, exactly this shape:
@@ -325,12 +343,12 @@ together.
 
 | Script | SHA-256 |
 |---|---|
-| `council.py` | `c88536c147c9f5f99b61595913ec200a7237838a48747e50d97431468b4fd479` |
+| `council.py` | `5bddab1ed56a3bc089416b224f9b5512deb5c4d11963be1dcac7a835f6dc86de` |
 | `render_check.py` | `58870fd0eb510d87fd75f94aba0eaafa6f0ce658b3e729c077a9e57f981258d7` |
 | `design_tokens.py` | `17fe482b02db00e0298401c0e4012fec9ca205ef0f6594a122bf22448b7fdf17` |
-| `round_prep.py` | `c43bedb40da72da616a4b87fb3c462be1f7b54f4149e8ddca74e4ff951131a39` |
+| `round_prep.py` | `2959eb4c70b2d380f13d7cc6aebbb178f6288fd8895af15f29d60166f83b7b5b` |
 | `profiles.py` | `5aa738737f451df62aced9e3b99a4648b793169cfe3ad094d3719cffd7cc5df5` |
-| `iterations.py` | `cf26ba2897084c314a577ba125b911a63aa892cf58f7bbd87f00e0231a8ef8aa` |
+| `iterations.py` | `778aeda273565601107ed9c2a261bb847edaf839f52aa881011646008dccc828` |
 
 The default catalogue is also pinned:
 

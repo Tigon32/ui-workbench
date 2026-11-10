@@ -135,6 +135,15 @@ class RoundPrepTest(unittest.TestCase):
                 capture = Path(record["path"])
                 self.assertTrue(capture.is_file())
                 self.assertEqual(record["sha256"], hashlib.sha256(capture.read_bytes()).hexdigest())
+            for ident in metadata["items"]:
+                item_dir = blind / ident
+                manifest = json.loads(
+                    (item_dir / "evidence-manifest.json").read_text(encoding="utf-8"))
+                self.assertTrue(manifest["references"])
+                for reference, record in manifest["references"].items():
+                    self.assertEqual(reference, f"{ident}/{record['path']}")
+                    self.assertEqual(
+                        record["sha256"], metadata["evidence_manifest"][reference]["sha256"])
             self.assertTrue(any("reflow-zoom-320.png" in ref
                                 for ref in metadata["evidence_manifest"]))
             self.assertTrue(any("state-ready-mobile-390.png" in ref

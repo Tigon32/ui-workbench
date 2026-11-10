@@ -166,7 +166,8 @@ def check_sheet(sheet, items, dims, name, rules=1, references=None):
                 refs = entry.get("evidence")
                 if (status not in ("observed", "not_assessed", "blocked", "unsupported")
                         or not isinstance(refs, list)
-                        or any(not isinstance(ref, str) or ref not in (references or {}) for ref in refs)):
+                        or any(not isinstance(ref, str) or ref not in (references or {})
+                               or not ref.startswith(f"{item}/") for ref in refs)):
                     raise RunError(f"{name}: {item}.{dim['id']}: invalid evidence status or references")
                 if status != "observed":
                     if score is not None:
@@ -257,6 +258,7 @@ def adoption_report(rubric, dims, contestants, valid, stats, meta):
                 if (not isinstance(check, dict) or check.get("status") != "pass"
                         or not isinstance(check.get("evidence"), list) or not check["evidence"]
                         or any(not isinstance(ref, str) or ref not in meta["evidence_manifest"]
+                               or not ref.startswith(f"{item}/")
                                for ref in check["evidence"])):
                     reasons.append(f"{tier} evidence is failed or unverified")
             zoom = meta.get("target_profiles", {}).get("desktop_zoom")
@@ -266,6 +268,7 @@ def adoption_report(rubric, dims, contestants, valid, stats, meta):
                 if (not isinstance(check, dict) or check.get("status") != "pass"
                         or not isinstance(refs, list) or not refs
                         or any(not isinstance(ref, str) or ref not in meta["evidence_manifest"]
+                               or not ref.startswith(f"{item}/")
                                for ref in refs)):
                     reasons.append("real desktop zoom evidence is unavailable or unverified")
                 elif any(
@@ -319,6 +322,23 @@ def weighted(entry, dims, only_critical=False):
 
 def fmt(value):
     return f"{value:.2f}"
+
+
+def calibration_exclusion_reason(sheet, weak, strong, dimensions):
+    reasons = []
+    if sheet["reviewer_kind"] == "generator":
+        reasons.append("self-review (generator)")
+    missing = []
+    for label, item in (("strong", strong), ("weak", weak)):
+        unscored = [
+            dimension["id"] for dimension in dimensions
+            if sheet["scores"][item][dimension["id"]]["score"] is None
+        ]
+        if unscored:
+            missing.append(f"{label}: {', '.join(unscored)}")
+    if missing:
+        reasons.append(f"incomplete calibration ({'; '.join(missing)})")
+    return "; ".join(reasons)
 
 
 def check_meta(meta, round_dir, caps, previous_keep):
@@ -384,11 +404,12 @@ def score_round(rubric, dims, round_dir, previous_keep):
              "| Reviewer | Strong | Weak | Margin | Result |", "|---|---|---|---|---|"]
     valid = []
     for sheet in loaded:
-        if rules >= 3 and (sheet["reviewer_kind"] == "generator" or any(
-                sheet["scores"][item][d["id"]]["score"] is None
-                for item in (weak, strong) for d in dims)):
-            lines.append(f"| {sheet['reviewer']} | - | - | - | excluded: self-review or incomplete calibration |")
-            continue
+        if rules >= 3:
+            exclusion = calibration_exclusion_reason(sheet, weak, strong, dims)
+            if exclusion:
+                lines.append(
+                    f"| {sheet['reviewer']} | - | - | - | excluded: {exclusion} |")
+                continue
         high = weighted(sheet["scores"][strong], dims)
         low = weighted(sheet["scores"][weak], dims)
         ok = high - low >= rubric["calibration_margin"]

@@ -2,10 +2,13 @@
 """Verify and report a hash-bound, project-local refinement ledger."""
 
 import argparse
+import base64
 import hashlib
+import html
 import json
 import math
 import sys
+import zlib
 from pathlib import Path
 
 
@@ -21,6 +24,11 @@ REVIEWER_KINDS = {
 }
 DECISIONS = {"keep", "revert", "blocked"}
 STOP_REASONS = {"target_provisionally_met", "no_gain", "iteration_cap", "blocked", "budget"}
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+MAX_CAPTURE_PIXELS = 40_000_000
+MAX_HTML_REPORT_BYTES = 32 * 1024 * 1024
+MAX_HTML_REPORT_PIXELS = 40_000_000
 
 
 def _read_json(path, label):
@@ -59,6 +67,121 @@ def _artifact(root, artifacts, reference):
         return json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise LedgerError(f"artifact {reference!r} must contain JSON: {error}") from error
+
+
+def _capture_png(root, artifacts, reference):
+    data = _bytes(root, artifacts, reference)
+    _require(len(data) <= MAX_CAPTURE_BYTES,
+             f"capture {reference!r} exceeds the self-contained HTML size limit")
+    _require(len(data) >= 24 and data.startswith(PNG_SIGNATURE)
+             and data[12:16] == b"IHDR",
+             f"capture {reference!r} must be a PNG image")
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    _require(width > 0 and height > 0 and width * height <= MAX_CAPTURE_PIXELS,
+             f"capture {reference!r} has invalid or excessive dimensions")
+    offset = 8
+    saw_ihdr = saw_idat = saw_iend = False
+    while offset < len(data):
+        _require(offset + 12 <= len(data),
+                 f"capture {reference!r} has a truncated PNG chunk")
+        length = int.from_bytes(data[offset:offset + 4], "big")
+        end = offset + 12 + length
+        _require(end <= len(data), f"capture {reference!r} has a truncated PNG chunk")
+        kind = data[offset + 4:offset + 8]
+        payload = data[offset + 8:offset + 8 + length]
+        checksum = int.from_bytes(data[offset + 8 + length:end], "big")
+        _require(zlib.crc32(kind + payload) & 0xFFFFFFFF == checksum,
+                 f"capture {reference!r} has a corrupt PNG chunk")
+        if not saw_ihdr:
+            _require(kind == b"IHDR" and length == 13,
+                     f"capture {reference!r} has an invalid PNG header")
+            saw_ihdr = True
+        elif kind == b"IHDR":
+            raise LedgerError(f"capture {reference!r} has multiple PNG headers")
+        if kind == b"IDAT":
+            saw_idat = True
+        if kind == b"IEND":
+            _require(length == 0 and end == len(data),
+                     f"capture {reference!r} has an invalid PNG end chunk")
+            saw_iend = True
+            break
+        offset = end
+    _require(saw_ihdr and saw_idat and saw_iend,
+             f"capture {reference!r} is an incomplete PNG image")
+    return width, height
+
+
+def _visual_evidence(root, artifacts, reference, attempt_id,
+                     before_source_ref, after_source_ref):
+    evidence = _artifact(root, artifacts, reference)
+    required = {
+        "schema_version", "coordinate_space", "attempt_id",
+        "before_source_ref", "after_source_ref", "before_capture_sha256",
+        "after_capture_sha256",
+        "before_capture_ref", "after_capture_ref", "changes",
+    }
+    _require(isinstance(evidence, dict) and set(evidence) == required,
+             f"visual evidence {reference!r} has an invalid shape")
+    _require(type(evidence["schema_version"]) is int and evidence["schema_version"] == 1
+             and evidence["coordinate_space"] == "normalized"
+             and type(evidence["attempt_id"]) is int
+             and evidence["attempt_id"] == attempt_id,
+             f"visual evidence {reference!r} has an unsupported version or attempt identity")
+    _require(evidence["before_source_ref"] == before_source_ref
+             and evidence["after_source_ref"] == after_source_ref,
+             f"visual evidence {reference!r} does not match the attempt's source snapshots")
+    capture_dimensions = {}
+    for side in ("before", "after"):
+        key = f"{side}_capture_ref"
+        _require(isinstance(evidence[key], str) and evidence[key] in artifacts,
+                 f"visual evidence {reference!r} needs a bound {key}")
+        width, height = _capture_png(root, artifacts, evidence[key])
+        capture_dimensions[side] = {"width": width, "height": height}
+    _require(evidence["before_capture_sha256"]
+             == artifacts[evidence["before_capture_ref"]]["sha256"]
+             and evidence["after_capture_sha256"]
+             == artifacts[evidence["after_capture_ref"]]["sha256"],
+             f"visual evidence {reference!r} capture digests do not match their artifacts")
+
+    changes = evidence["changes"]
+    _require(isinstance(changes, list) and len(changes) <= 100,
+             f"visual evidence {reference!r} changes must be a list of at most 100 items")
+    change_ids = set()
+    for change in changes:
+        _require(isinstance(change, dict)
+                 and set(change) == {"id", "label", "description", "before", "after"}
+                 and isinstance(change.get("id"), str) and change["id"].strip()
+                 and len(change["id"]) <= 80 and change["id"] not in change_ids
+                 and isinstance(change.get("label"), str) and change["label"].strip()
+                 and len(change["label"]) <= 160
+                 and isinstance(change.get("description"), str)
+                 and change["description"].strip() and len(change["description"]) <= 2000,
+                 f"visual evidence {reference!r} contains an invalid change description")
+        change_ids.add(change["id"])
+        for side in ("before", "after"):
+            arrow = change[side]
+            _require(isinstance(arrow, dict) and set(arrow) == {"start", "end"},
+                     f"visual evidence {reference!r} change {change['id']!r} needs {side} arrow points")
+            for point_name in ("start", "end"):
+                point = arrow[point_name]
+                _require(isinstance(point, dict) and set(point) == {"x", "y"}
+                         and all(type(point[key]) in (int, float)
+                                 and math.isfinite(point[key]) and 0 <= point[key] <= 1
+                                 for key in ("x", "y")),
+                         f"visual evidence {reference!r} change {change['id']!r} "
+                         f"has an invalid normalized {side} {point_name} point")
+            _require(math.hypot(
+                arrow["end"]["x"] - arrow["start"]["x"],
+                arrow["end"]["y"] - arrow["start"]["y"],
+            ) > 0,
+                     f"visual evidence {reference!r} change {change['id']!r} "
+                     f"has a zero-length {side} arrow")
+    return {
+        **evidence,
+        "before_capture_dimensions": capture_dimensions["before"],
+        "after_capture_dimensions": capture_dimensions["after"],
+    }
 
 
 def _source(root, artifacts, reference, scope_id):
@@ -729,7 +852,11 @@ def verify(path):
         _, new_scores, new_checks, new_findings = snapshot(
             attempt.get("after"), f"attempt {expected_id} after",
             affected_points=attempt.get("affected_points", ()))
-        attempt_comparison_status = "legacy_unspecified"
+        attempt_comparison_status = (
+            "reviewer_changed"
+            if old_scores["reviewer"] != new_scores["reviewer"]
+            else "legacy_unspecified"
+        )
         if format_version == 2:
             before_version = attempt["before"]["version_id"]
             after_version = attempt["after"]["version_id"]
@@ -742,27 +869,115 @@ def verify(path):
                 attempt_comparison_status = "compatible"
             else:
                 attempt_comparison_status = "incompatible"
+        visual_ref = attempt.get("visual_ref")
+        visual_data = None
+        if visual_ref is not None:
+            _require(isinstance(visual_ref, str) and visual_ref.strip(),
+                     f"attempt {expected_id} visual_ref must name a bound artifact")
+            visual_data = _visual_evidence(
+                path.parent, artifacts, visual_ref, expected_id,
+                attempt["before"]["source_ref"], attempt["after"]["source_ref"])
+            if format_version == 2:
+                visual_refs = {
+                    visual_ref, visual_data["before_capture_ref"],
+                    visual_data["after_capture_ref"],
+                }
+                _require(visual_refs <= set(attempt["actual_evidence"]),
+                         f"attempt {expected_id} visual evidence and captures must be in actual_evidence")
+        score_changes = {}
+        points_by_id = {point["id"]: point for point in points}
+        targeted_points = attempt.get(
+            "affected_points", attempt.get("dimensions", []))
+        targeted_point_ids = set(targeted_points)
+        expected_gains = attempt.get("expected_gain", {})
+        for point_id in comparison_point_ids:
+            before_point = old_scores["points"].get(point_id)
+            after_point = new_scores["points"].get(point_id)
+            if before_point is None and after_point is None:
+                continue
+            before_score = before_point.get("score") if before_point else None
+            after_score = after_point.get("score") if after_point else None
+            comparable = (
+                old_scores["reviewer"] == new_scores["reviewer"]
+                and (format_version == 1 or attempt_comparison_status == "compatible")
+            )
+            delta = (
+                after_score - before_score
+                if comparable and before_score is not None and after_score is not None
+                else None
+            )
+            point_expected_gain = expected_gains.get(point_id)
+            score_changes[point_id] = {
+                "selected": points_by_id.get(point_id, {}).get("selected", False),
+                "targeted": point_id in targeted_point_ids,
+                "expected_gain": point_expected_gain,
+                "gain_status": (
+                    "not_targeted" if point_id not in targeted_point_ids
+                    else "not_comparable" if delta is None or point_expected_gain is None
+                    else "met" if delta >= point_expected_gain
+                    else "missed"
+                ),
+                "before_score": before_score,
+                "after_score": after_score,
+                "delta": delta,
+                "before_assessment_state": (
+                    before_point.get("assessment_state", "legacy_unspecified")
+                    if before_point else "unassessed"
+                ),
+                "after_assessment_state": (
+                    after_point.get("assessment_state", "legacy_unspecified")
+                    if after_point else "unassessed"
+                ),
+                "before_evidence_status": (
+                    before_point.get("evidence_status", "not_assessed")
+                    if before_point else "not_assessed"
+                ),
+                "after_evidence_status": (
+                    after_point.get("evidence_status", "not_assessed")
+                    if after_point else "not_assessed"
+                ),
+                "before_evidence": before_point.get("evidence", []) if before_point else [],
+                "after_evidence": after_point.get("evidence", []) if after_point else [],
+            }
         attempt_reports.append({
             "id": expected_id,
             "hypothesis": attempt["hypothesis"],
             "decision": attempt.get("decision"),
             "reason": attempt.get("reason"),
             "reviewer_kind": new_scores["reviewer"]["kind"],
+            "reviewer": new_scores["reviewer"],
+            "provisional": attempt.get("provisional"),
+            "before_source_ref": attempt["before"]["source_ref"],
+            "after_source_ref": attempt["after"]["source_ref"],
+            "retained_source_ref": attempt.get("retained_source_ref"),
             "expected_outcomes": attempt.get("expected_outcomes", []),
             "actual_outcomes": attempt.get("actual_outcomes", []),
             "actual_evidence": attempt.get("actual_evidence", []),
             "regressions": attempt.get("regressions", []),
             "effort_minutes": attempt.get("effort_minutes"),
             "affected_points": attempt.get("affected_points", []),
+            "expected_gain": expected_gains,
+            "targeted_points": list(targeted_points),
             "decision_reason": attempt.get("reason"),
             "decision_records": attempt.get("decision_records", []),
             "comparison_status": attempt_comparison_status,
+            "score_changes": score_changes,
+            "visual_evidence": (
+                {"status": "not_provided"} if visual_data is None
+                else {
+                    "status": "provided",
+                    "reference": visual_ref,
+                    "reference_sha256": artifacts[visual_ref]["sha256"],
+                    **visual_data,
+                }
+            ),
             "dimension_changes": {
                 point_id: (
                     new_scores["points"].get(point_id, {}).get("score")
                     - old_scores["points"].get(point_id, {}).get("score")
-                    if (format_version == 1
-                        or attempt_comparison_status == "compatible")
+                    if (old_scores["reviewer"] == new_scores["reviewer"]
+                        and (format_version == 1
+                             or attempt_comparison_status == "compatible"))
                     and new_scores["points"].get(point_id, {}).get("score") is not None
                     and old_scores["points"].get(point_id, {}).get("score") is not None
                     else None
@@ -795,13 +1010,25 @@ def verify(path):
                  },
                  f"attempt {expected_id} decision record does not bind its final evidence")
         if format_version == 2:
-            _require(decision_record.get("attempt_summary") == {
+            expected_summary = {
                 key: attempt[key] for key in (
                     "expected_outcomes", "actual_outcomes", "actual_evidence",
                     "affected_points", "dependencies", "guardrails", "regressions",
                     "effort_minutes", "decision_actor", "decision_records",
                 )
-            }, f"attempt {expected_id} decision does not freeze outcomes, effort, regressions and authority")
+            }
+            if visual_ref is not None:
+                expected_summary.update({
+                    "visual_ref": visual_ref,
+                    "visual_sha256": artifacts[visual_ref]["sha256"],
+                })
+            _require(decision_record.get("attempt_summary") == expected_summary,
+                     f"attempt {expected_id} decision does not freeze outcomes, effort, regressions and authority")
+        if visual_ref is not None:
+            _require(decision_record.get("visual_ref") == visual_ref,
+                     f"attempt {expected_id} decision record does not bind its visual evidence")
+            _require(decision_record.get("visual_sha256") == artifacts[visual_ref]["sha256"],
+                     f"attempt {expected_id} decision record does not bind its visual evidence digest")
         if attempt["decision"] == "keep":
             _require(attempt.get("provisional") is True,
                      f"attempt {expected_id} keep must be provisional")
@@ -1304,18 +1531,485 @@ def report(verified):
     }
 
 
+def _html_text(value):
+    return html.escape(str(value), quote=True)
+
+
+def _score_label(value):
+    return "Not assessed" if value is None else str(value)
+
+
+def _render_arrow_overlay(evidence, side, attempt_id):
+    dimensions = evidence[f"{side}_capture_dimensions"]
+    width = dimensions["width"]
+    height = dimensions["height"]
+    lines = []
+    markers = []
+    for index, change in enumerate(evidence["changes"], 1):
+        arrow = change[side]
+        start = arrow["start"]
+        end = arrow["end"]
+        marker_id = f"arrow-{attempt_id}-{side}-{index}"
+        start_x = start["x"] * width
+        start_y = start["y"] * height
+        end_x = end["x"] * width
+        end_y = end["y"] * height
+        dx = end_x - start_x
+        dy = end_y - start_y
+        length = math.hypot(dx, dy)
+        radius = min(28.0, width / 4, height / 4, length / 4)
+        stroke_width = max(1.0, radius * 0.28)
+        badge_stroke_width = min(3.0, radius * 0.1)
+        marker_size = min(24.0, radius * 0.9)
+        font_size = max(1.0, min(32.0, radius * 1.1))
+        badge_x = start_x - (dx / length * radius * 1.8 if length else 0)
+        badge_y = start_y - (dy / length * radius * 1.8 if length else 0)
+        badge_x = min(max(badge_x, radius), width - radius)
+        badge_y = min(max(badge_y, radius), height - radius)
+        lines.append(
+            f'<line x1="{start_x:.3f}" y1="{start_y:.3f}" '
+            f'x2="{end_x:.3f}" y2="{end_y:.3f}" '
+            f'class="change-arrow" stroke-width="{stroke_width:.3f}" '
+            f'marker-end="url(#{marker_id})"></line>'
+            f'<circle cx="{badge_x:.3f}" cy="{badge_y:.3f}" '
+            f'r="{radius:.3f}" class="arrow-number" '
+            f'stroke-width="{badge_stroke_width:.3f}"></circle>'
+            f'<text x="{badge_x:.3f}" y="{badge_y:.3f}" '
+            f'class="arrow-number-text" font-size="{font_size:.3f}">{index}</text>'
+        )
+        markers.append(
+            f'<marker id="{marker_id}" markerWidth="{marker_size:.3f}" '
+            f'markerHeight="{marker_size:.3f}" refX="{marker_size:.3f}" '
+            f'refY="{marker_size / 2:.3f}" orient="auto" '
+            f'markerUnits="userSpaceOnUse"><path d="M0 0 '
+            f'L{marker_size:.3f} {marker_size / 2:.3f} L0 {marker_size:.3f} z" '
+            f'class="arrow-head"></path></marker>'
+        )
+    return (
+        f'<svg class="arrow-overlay" viewBox="0 0 {width} {height}" '
+        'preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">'
+        f"<defs>{''.join(markers)}</defs>{''.join(lines)}</svg>"
+    )
+
+
+def _render_capture(verified, evidence, side, attempt_id):
+    reference = evidence[f"{side}_capture_ref"]
+    data = _bytes(Path(verified["path"]).parent, verified["artifacts"], reference)
+    encoded = base64.b64encode(data).decode("ascii")
+    title = "Before" if side == "before" else "After"
+    overlay = _render_arrow_overlay(evidence, side, attempt_id)
+    alt_text = (
+        f"{title} capture with numbered red arrows marking the reported changes"
+        if evidence["changes"] else
+        f"{title} capture; no visual annotations were supplied"
+    )
+    return (
+        f'<figure class="capture-figure"><figcaption>{title} capture '
+        f'<span class="artifact-ref">{_html_text(reference)}</span></figcaption>'
+        f'<div class="capture-frame"><img src="data:image/png;base64,{encoded}" '
+        f'alt="{_html_text(alt_text)}" '
+        f'aria-describedby="changes-{attempt_id}">'
+        f"{overlay}</div></figure>"
+    )
+
+
+def _render_change_notes(evidence):
+    if not evidence["changes"]:
+        return (
+            f'<p class="empty-evidence" id="changes-{_html_text(evidence["attempt_id"])}">'
+            'No changes were annotated in this attempt; arrows were not inferred.</p>'
+        )
+    cards = []
+    for index, change in enumerate(evidence["changes"], 1):
+        cards.append(
+            f'<li class="change-note"><span class="change-number" aria-hidden="true">'
+            f'{index}</span><div><h4>{_html_text(change["label"])}</h4>'
+            f'<p>{_html_text(change["description"])}</p></div></li>'
+        )
+    return f'<ol class="change-notes" id="changes-{_html_text(evidence["attempt_id"])}">{"".join(cards)}</ol>'
+
+
+def _render_score_table(attempt):
+    rows = []
+    for point_id, change in attempt["score_changes"].items():
+        delta = change["delta"]
+        delta_text = "Not comparable" if delta is None else f"{delta:+d}"
+        selected = "Selected" if change["selected"] else "Excluded"
+        evidence = []
+        if change["before_evidence"]:
+            evidence.append("before: " + ", ".join(change["before_evidence"]))
+        if change["after_evidence"]:
+            evidence.append("after: " + ", ".join(change["after_evidence"]))
+        if not evidence:
+            evidence.append("No evidence references")
+        target_label = "Not targeted"
+        if change["targeted"]:
+            if change["expected_gain"] is None:
+                target_label = "Target · gain not declared"
+            else:
+                result = {
+                    "met": "met",
+                    "missed": "missed",
+                    "not_comparable": "not comparable",
+                }[change["gain_status"]]
+                target_label = f'Target +{change["expected_gain"]} ({result})'
+        rows.append(
+            '<tr>'
+            f'<th scope="row">{_html_text(point_id)}'
+            f'<span class="selection-status">{selected}</span>'
+            f'<span class="target-status">{_html_text(target_label)}</span></th>'
+            f'<td><span class="mobile-cell-label">Before</span>'
+            f'{_score_label(change["before_score"])}'
+            f'<small>{_html_text(change["before_assessment_state"])} · '
+            f'{_html_text(change["before_evidence_status"])}</small></td>'
+            f'<td><span class="mobile-cell-label">After</span>'
+            f'{_score_label(change["after_score"])}'
+            f'<small>{_html_text(change["after_assessment_state"])} · '
+            f'{_html_text(change["after_evidence_status"])}</small></td>'
+            f'<td><span class="mobile-cell-label">Delta</span>'
+            f'<strong>{delta_text}</strong></td>'
+            f'<td><span class="mobile-cell-label">Evidence</span>'
+            f'<small>{_html_text(" · ".join(evidence))}</small></td>'
+            '</tr>'
+        )
+    if not rows:
+        return '<p class="empty-evidence">No score changes were recorded.</p>'
+    return (
+        '<div class="score-table-wrap"><table class="score-table">'
+        '<caption>Per-point scores for this attempt</caption>'
+        '<thead><tr><th scope="col">Point</th><th scope="col">Before</th>'
+        '<th scope="col">After</th><th scope="col">Delta</th>'
+        '<th scope="col">Evidence</th></tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table></div>'
+    )
+
+
+def _render_attempt(verified, attempt):
+    attempt_id = attempt["id"]
+    evidence = attempt["visual_evidence"]
+    decision = attempt.get("decision") or "unrecorded"
+    evidence_html = ""
+    if evidence["status"] == "provided":
+        evidence_html = (
+            '<section class="section visual-section" aria-labelledby="visual-'
+            f'{attempt_id}"><div class="section-heading"><div><p class="eyebrow">'
+            'Visual evidence</p><h3 id="visual-'
+            f'{attempt_id}">Before and after</h3></div>'
+            f'<span class="artifact-ref">Bound: {_html_text(evidence["reference"])}</span>'
+            '</div><div class="capture-grid">'
+            f'{_render_capture(verified, evidence, "before", attempt_id)}'
+            f'{_render_capture(verified, evidence, "after", attempt_id)}'
+            f'</div>{_render_change_notes(evidence)}</section>'
+        )
+    else:
+        evidence_html = (
+            '<section class="section visual-section" aria-labelledby="visual-'
+            f'{attempt_id}"><p class="eyebrow">Visual evidence</p>'
+            f'<h3 id="visual-{attempt_id}">No captures supplied</h3>'
+            '<p class="empty-evidence">'
+            'No captures or annotations were supplied for this attempt. '
+            'No arrows were inferred.</p></section>'
+        )
+
+    outcome_items = []
+    for label, key in (("Expected outcomes", "expected_outcomes"),
+                       ("Observed outcomes", "actual_outcomes"),
+                       ("Regressions", "regressions")):
+        values = attempt.get(key, [])
+        if values:
+            content = "".join(f"<li>{_html_text(item)}</li>" for item in values)
+        else:
+            content = "<li>None recorded</li>"
+        outcome_items.append(
+            f'<div class="outcome-block"><h4>{label}</h4><ul>{content}</ul></div>'
+        )
+    refs = attempt.get("actual_evidence", [])
+    evidence_refs = (
+        ", ".join(_html_text(reference) for reference in refs)
+        if refs else "No additional evidence references"
+    )
+    comparison = attempt.get("comparison_status", "legacy_unspecified")
+    decision_label = (
+        f'{decision.title()} (provisional)'
+        if attempt.get("provisional") is True else decision.title()
+    )
+    effort = (
+        f'{attempt["effort_minutes"]} minutes'
+        if attempt.get("effort_minutes") is not None else "Not recorded"
+    )
+    return (
+        f'<article class="attempt-card" id="attempt-{attempt_id}">'
+        '<header class="attempt-header"><div><p class="eyebrow">'
+        f'Attempt {attempt_id} · {_html_text(attempt.get("reviewer_kind", "unknown"))}'
+        f'</p><h2>{_html_text(attempt.get("hypothesis", "Attempt"))}</h2></div>'
+        f'<span class="decision decision-{_html_text(decision)}">'
+        f'{_html_text(decision_label)}</span></header>'
+        f'<div class="attempt-summary"><p>{_html_text(attempt.get("decision_reason") or "No decision rationale recorded.")}</p>'
+        f'<dl><div><dt>Score comparison</dt><dd>{_html_text(comparison)}</dd></div>'
+        f'<div><dt>Effort</dt><dd>{_html_text(effort)}</dd></div>'
+        f'<div><dt>Retained source</dt><dd>{_html_text(attempt.get("retained_source_ref") or "Not specified")}</dd></div></dl></div>'
+        f'<div class="source-comparison"><span><strong>Before source:</strong> '
+        f'{_html_text(attempt.get("before_source_ref") or "Not specified")}</span>'
+        f'<span><strong>After source:</strong> '
+        f'{_html_text(attempt.get("after_source_ref") or "Not specified")}</span></div>'
+        '<section class="section"><p class="eyebrow">Scorecard</p>'
+        '<h3>What changed in the scores</h3>'
+        f'{_render_score_table(attempt)}</section>'
+        f'{evidence_html}'
+        '<section class="section"><p class="eyebrow">Change record</p>'
+        '<h3>What was expected and observed</h3>'
+        f'<div class="outcome-grid">{"".join(outcome_items)}</div>'
+        f'<p class="evidence-refs"><strong>Evidence refs:</strong> {evidence_refs}</p>'
+        '</section></article>'
+    )
+
+
+def html_report(verified, attempt_id=None):
+    """Render a fully self-contained, escaped HTML report from a verified ledger."""
+    data = report(verified)
+    attempts = data["attempt_reports"]
+    if attempt_id is not None:
+        _require(type(attempt_id) is int and attempt_id > 0,
+                 "--attempt must be a positive integer")
+        attempts = [attempt for attempt in attempts if attempt["id"] == attempt_id]
+        _require(attempts, f"attempt {attempt_id} does not exist in this ledger")
+    embedded_bytes = 0
+    embedded_pixels = 0
+    root = Path(verified["path"]).parent
+    for attempt in attempts:
+        evidence = attempt["visual_evidence"]
+        if evidence["status"] != "provided":
+            continue
+        for side in ("before", "after"):
+            image = _bytes(
+                root, verified["artifacts"], evidence[f"{side}_capture_ref"])
+            embedded_bytes += 4 * ((len(image) + 2) // 3)
+            dimensions = evidence[f"{side}_capture_dimensions"]
+            embedded_pixels += dimensions["width"] * dimensions["height"]
+    _require(embedded_pixels <= MAX_HTML_REPORT_PIXELS,
+             f"embedded captures exceed the {MAX_HTML_REPORT_PIXELS:,}-pixel HTML report limit")
+    _require(embedded_bytes <= MAX_HTML_REPORT_BYTES,
+             f"embedded captures exceed the {MAX_HTML_REPORT_BYTES}-byte HTML report limit")
+    rendered_attempts = "".join(
+        _render_attempt(verified, attempt) for attempt in attempts
+    )
+    if not attempts:
+        rendered_attempts = (
+            '<section class="empty-report"><h2>No attempts recorded</h2>'
+            '<p>This ledger contains no refinement attempts to report.</p></section>'
+        )
+    stop = data["stop"]
+    stop_text = stop.get("reason_text") or stop.get("reason") or "Not recorded"
+    final_review = data.get("final_review")
+    if isinstance(final_review, dict):
+        reviewer = final_review.get("reviewer")
+        reviewer_label = (
+            f'{reviewer.get("kind", "unknown")} · {reviewer.get("id", "unnamed")}'
+            if isinstance(reviewer, dict) else "Reviewer not recorded"
+        )
+        final_review_text = (
+            f'{final_review.get("status", "unspecified")} · {reviewer_label} · '
+            f'source {final_review.get("source_ref", "unspecified")}'
+        )
+        final_review_text = _html_text(final_review_text)
+    else:
+        final_review_text = (
+            "Not recorded. A kept attempt is provisional progress, not an "
+            "independent acceptance or adoption decision."
+        )
+    limitation_items = "".join(
+        f"<li>{_html_text(limitation)}</li>" for limitation in data["limitations"]
+    )
+    limitation_items += (
+        "<li>Design scores are expert judgments, not usability outcomes or "
+        "compliance percentages.</li>"
+    )
+    summary = (
+        f'<p class="report-meta">Scope <strong>{_html_text(data["scope_id"])}</strong>'
+        f'<span>Build {_html_text(data["build_id"])}</span>'
+        f'<span>{data["attempts"]} attempt(s)</span></p>'
+        f'<p class="report-stop"><strong>Run stop:</strong> {_html_text(stop_text)}</p>'
+    )
+    document = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Refinement report · {_html_text(data["scope_id"])}</title>
+<style>
+:root {{
+  color-scheme: light;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ink: #17212b; --page: #f3f5f7; --surface: #fff; --muted: #46596c;
+  --text-secondary: #34495c; --subtle: #526579; --line: #d5dce3;
+  --line-soft: #e1e6eb; --line-strong: #cbd4dd; --empty-line: #9aa8b5;
+  --panel: #edf2f6; --capture-bg: #edf1f4; --empty-bg: #f7f9fa;
+  --decision-bg: #e8edf2; --decision-ink: #283b4d;
+  --keep-bg: #e5f4eb; --keep-ink: #175c35;
+  --revert-bg: #fff2df; --revert-ink: #744700;
+  --blocked-bg: #fce8e8; --blocked-ink: #7d1717;
+  --focus: #0b5cab; --arrow: #c62836;
+  --shadow: 0 8px 24px rgb(23 33 43 / 5%);
+  color: var(--ink); background: var(--page); font-synthesis: none;
+}}
+* {{ box-sizing: border-box; }}
+body {{ margin: 0; line-height: 1.5; }}
+main {{ width: min(1120px, 100% - 32px); margin: 0 auto; padding: 32px 0 64px; }}
+h1, h2, h3, h4, p {{ margin-top: 0; }}
+h1 {{ margin-bottom: 8px; font-size: clamp(1.8rem, 5vw, 2.8rem); line-height: 1.1; letter-spacing: -.03em; }}
+h2 {{ font-size: clamp(1.15rem, 3vw, 1.55rem); line-height: 1.25; overflow-wrap: anywhere; }}
+h3 {{ margin-bottom: 16px; font-size: 1.25rem; }}
+h4 {{ margin-bottom: 4px; font-size: 1rem; }}
+.eyebrow {{ margin-bottom: 6px; color: var(--muted); font-size: .75rem; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }}
+.report-header {{ padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }}
+.report-meta {{ display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 8px; color: var(--muted); font-size: .9rem; }}
+.report-stop {{ margin: 0; padding: 12px 14px; border-left: 4px solid var(--subtle); border-radius: 4px; background: var(--panel); overflow-wrap: anywhere; }}
+.attempt-list {{ display: grid; gap: 24px; margin-top: 24px; }}
+.attempt-card {{ min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }}
+.attempt-header {{ display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 24px 16px; }}
+.attempt-header h2 {{ max-width: 760px; margin-bottom: 0; }}
+.attempt-summary {{ padding: 0 24px 20px; }}
+.attempt-summary > p {{ max-width: 80ch; color: var(--text-secondary); }}
+.attempt-summary dl {{ display: flex; flex-wrap: wrap; gap: 12px 28px; margin: 0; }}
+.attempt-summary dl div {{ min-width: 140px; max-width: 100%; }}
+dt {{ color: var(--subtle); font-size: .78rem; font-weight: 700; }}
+dd {{ margin: 2px 0 0; overflow-wrap: anywhere; font-weight: 600; }}
+.decision {{ flex: none; padding: 6px 12px; border-radius: 999px; background: var(--decision-bg); color: var(--decision-ink); font-size: .85rem; font-weight: 750; }}
+.decision-keep {{ background: var(--keep-bg); color: var(--keep-ink); }}
+.decision-revert {{ background: var(--revert-bg); color: var(--revert-ink); }}
+.decision-blocked {{ background: var(--blocked-bg); color: var(--blocked-ink); }}
+.section {{ padding: 22px 24px; border-top: 1px solid var(--line-soft); }}
+.section-heading {{ display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }}
+.section-heading h3 {{ margin-bottom: 0; }}
+.artifact-ref {{ max-width: 100%; color: var(--subtle); font-size: .78rem; overflow-wrap: anywhere; }}
+.score-table-wrap {{ width: 100%; }}
+.score-table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+.score-table caption {{ padding-bottom: 8px; color: var(--subtle); font-size: .85rem; text-align: left; }}
+.score-table th, .score-table td {{ padding: 11px 10px; border-top: 1px solid var(--line-soft); text-align: left; vertical-align: top; overflow-wrap: anywhere; }}
+.score-table thead th {{ color: var(--muted); font-size: .78rem; }}
+.score-table tbody th {{ width: 20%; font-weight: 700; }}
+.score-table small {{ display: block; margin-top: 3px; color: var(--subtle); font-size: .75rem; }}
+.selection-status {{ display: inline-block; margin-left: 6px; color: var(--subtle); font-size: .7rem; font-weight: 600; }}
+.mobile-cell-label {{ display: none; }}
+.source-comparison {{ display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 14px; color: var(--subtle); font-size: .8rem; overflow-wrap: anywhere; }}
+.capture-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }}
+.capture-figure {{ min-width: 0; margin: 0; }}
+.capture-figure figcaption {{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-bottom: 8px; font-weight: 750; }}
+.capture-frame {{ position: relative; width: 100%; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--capture-bg); }}
+.capture-frame img {{ display: block; width: 100%; height: auto; }}
+.arrow-overlay {{ position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }}
+.change-arrow {{ stroke: var(--arrow); stroke-linecap: round; }}
+.arrow-head {{ fill: var(--arrow); }}
+.arrow-number {{ fill: var(--arrow); stroke: var(--surface); }}
+.arrow-number-text {{ fill: var(--surface); font-weight: 800; text-anchor: middle; dominant-baseline: central; }}
+.change-notes {{ display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }}
+.change-note {{ display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: start; gap: 10px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 10px; }}
+.change-number {{ display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: var(--arrow); color: var(--surface); font-size: .85rem; font-weight: 800; }}
+.change-note p {{ margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }}
+.outcome-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }}
+.outcome-block {{ min-width: 0; padding: 12px; border: 1px solid var(--line-soft); border-radius: 10px; }}
+.outcome-block ul {{ margin: 6px 0 0; padding-left: 20px; }}
+.outcome-block li {{ margin-top: 4px; overflow-wrap: anywhere; }}
+.evidence-refs {{ margin: 16px 0 0; color: var(--subtle); font-size: .82rem; overflow-wrap: anywhere; }}
+.target-status {{ display: block; margin-top: 3px; color: var(--subtle); font-size: .7rem; font-weight: 600; }}
+.empty-evidence {{ margin: 0; padding: 14px; border: 1px dashed var(--empty-line); border-radius: 8px; background: var(--empty-bg); color: var(--text-secondary); }}
+.empty-report {{ margin-top: 24px; padding: 24px; border: 1px dashed var(--empty-line); border-radius: 14px; background: var(--surface); }}
+.report-footer {{ margin-top: 24px; padding: 20px 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }}
+.report-footer p {{ overflow-wrap: anywhere; }}
+.report-footer ul {{ margin-bottom: 0; padding-left: 20px; }}
+:focus-visible {{ outline: 3px solid var(--focus); outline-offset: 3px; }}
+@media (max-width: 700px) {{
+  main {{ width: min(100% - 20px, 1120px); padding-top: 10px; }}
+  .report-header, .attempt-card {{ border-radius: 12px; }}
+  .report-header {{ padding: 18px; }}
+  .attempt-header {{ padding: 18px 16px 14px; }}
+  .attempt-summary {{ padding: 0 16px 16px; }}
+  .section {{ padding: 18px 16px; }}
+  .capture-grid {{ grid-template-columns: minmax(0, 1fr); gap: 14px; }}
+  .outcome-grid {{ grid-template-columns: minmax(0, 1fr); }}
+  .section-heading {{ align-items: flex-start; flex-direction: column; }}
+}}
+@media (max-width: 480px) {{
+  .attempt-header {{ flex-direction: column; gap: 10px; }}
+  .attempt-summary dl {{ display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }}
+  .score-table thead {{ position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }}
+  .score-table, .score-table tbody {{ display: block; width: 100%; }}
+  .score-table tr {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 12px 0; border-top: 1px solid var(--line); }}
+  .score-table th, .score-table td {{ display: block; min-width: 0; width: auto; padding: 0; border: 0; }}
+  .score-table tbody th {{ grid-column: 1 / -1; }}
+  .mobile-cell-label {{ display: block; margin-bottom: 2px; color: var(--subtle); font-size: .7rem; font-weight: 700; text-transform: uppercase; }}
+}}
+@media (prefers-reduced-motion: reduce) {{ *, *::before, *::after {{ scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }} }}
+@media (forced-colors: active) {{
+  .report-header, .attempt-card, .outcome-block, .change-note, .capture-frame {{ border: 1px solid CanvasText; }}
+  .decision, .report-stop, .empty-evidence {{ border: 1px solid CanvasText; background: Canvas; color: CanvasText; }}
+  .change-arrow {{ stroke: LinkText; }}
+  .arrow-head, .arrow-number, .change-number {{ fill: LinkText; background: LinkText; }}
+  .arrow-number-text {{ fill: Canvas; }}
+}}
+</style>
+</head>
+<body>
+<main>
+<header class="report-header">
+<p class="eyebrow">UI Workbench · Iterative refinement</p>
+<h1>Attempt report</h1>
+{summary}
+</header>
+<div class="attempt-list">{rendered_attempts}</div>
+<footer class="report-footer">
+<p class="eyebrow">Review status and limits</p>
+<h2>Independent review</h2>
+<p>{final_review_text}</p>
+<ul>{limitation_items}</ul>
+</footer>
+</main>
+</body>
+</html>
+"""
+    _require(len(document.encode("utf-8")) <= MAX_HTML_REPORT_BYTES,
+             f"HTML report exceeds the {MAX_HTML_REPORT_BYTES}-byte output limit")
+    return document
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("verify", "report"))
+    parser.add_argument("command", choices=("verify", "report", "html"))
     parser.add_argument("ledger", type=Path)
+    parser.add_argument("--attempt", type=int,
+                        help="render only this attempt (HTML command only)")
+    parser.add_argument("--output", type=Path,
+                        help="write HTML report to this path (HTML command only)")
     args = parser.parse_args(argv)
     try:
+        _require(args.command == "html" or (
+            args.attempt is None and args.output is None),
+            "--attempt and --output are valid only for the HTML command")
         result = verify(args.ledger)
         if args.command == "verify":
             print(f"ledger: valid; {len(result['iterations'])} attempt(s); "
                   f"retained {result['retained_source_ref']}")
-        else:
+        elif args.command == "report":
             print(json.dumps(report(result), indent=2, sort_keys=True))
+        else:
+            rendered = html_report(result, args.attempt)
+            if args.output:
+                output_path = args.output.resolve()
+                protected_paths = {args.ledger.resolve()}
+                for artifact in result["artifacts"].values():
+                    artifact_path = Path(artifact["path"])
+                    if not artifact_path.is_absolute():
+                        artifact_path = args.ledger.resolve().parent / artifact_path
+                    protected_paths.add(artifact_path.resolve())
+                _require(output_path not in protected_paths,
+                         "HTML output must not overwrite the ledger or one of its artifacts")
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(rendered, encoding="utf-8")
+                print(f"HTML report written to {args.output}")
+            else:
+                sys.stdout.write(rendered)
     except (LedgerError, OSError, TypeError, KeyError) as error:
         print(f"iterations: {error}", file=sys.stderr)
         return 1
