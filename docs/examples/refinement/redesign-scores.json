@@ -1,0 +1,45 @@
+{
+  "scope_id": "desktop-evidence-fixture-v1",
+  "build_id": "redesign-html-1",
+  "reviewer": {
+    "kind": "generator_self_assessment",
+    "id": "illustrative-fixture-author"
+  },
+  "points": {
+    "hierarchy": {
+      "score": 9,
+      "evidence_status": "observed",
+      "reason": "Illustrative score only; not an independent review.",
+      "assessed_source_ref": "redesign-source",
+      "anchor": "Illustrative 9 anchor: a clear, consistent hierarchy is visible.",
+      "evidence": ["redesign-checks"]
+    },
+    "job_completion": {
+      "score": 9,
+      "evidence_status": "observed",
+      "reason": "Illustrative score only; not a human task outcome.",
+      "assessed_source_ref": "redesign-source",
+      "anchor": "Illustrative 9 anchor: the declared path is concise and clear.",
+      "evidence": ["redesign-checks"]
+    },
+    "truthful_state": {
+      "score": 8,
+      "evidence_status": "observed",
+      "reason": "Illustrative score only; state wording has not been user tested.",
+      "assessed_source_ref": "redesign-source",
+      "evidence": ["redesign-checks"]
+    },
+    "layout": {
+      "score": 8,
+      "evidence_status": "observed",
+      "reason": "Illustrative score only; not an independent visual assessment.",
+      "assessed_source_ref": "redesign-source",
+      "evidence": ["redesign-checks"]
+    },
+    "accessibility": {
+      "score": null,
+      "evidence_status": "not_assessed",
+      "evidence": []
+    }
+  }
+}

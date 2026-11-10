@@ -1,0 +1,22 @@
+{
+  "scope_id": "desktop-evidence-fixture-v1",
+  "build_id": "baseline-html-1",
+  "files": {
+    "page": {
+      "path": "alternatives/baseline/index.html",
+      "sha256": "ab30d0fb45b7d71b4e6873657e09fed34140aab14c23385308c2a2c48255183e"
+    },
+    "rubric": {
+      "path": "rubric.json",
+      "sha256": "1280b04178acf5463e7f90eba42f8ba2fe880394bba2e7239a2a9e1285aa08e3"
+    },
+    "expected-text": {
+      "path": "expected.json",
+      "sha256": "a003110621bb92211f63c1f821edc33b4d1d9ecc9599c44b8397763efa404a8d"
+    },
+    "task-fixture": {
+      "path": "tasks.json",
+      "sha256": "26bdab10b9b8196cf1862661c45f0dffe782198601b4d14a0887feaa33e5a9c7"
+    }
+  }
+}

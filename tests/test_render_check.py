@@ -104,6 +104,17 @@ class RenderCheckTest(unittest.TestCase):
     def test_good_page_passes_every_check(self):
         self.assertEqual(self.check("good", GOOD), set())
 
+    def test_color_mix_custom_property_passes_and_direct_color_is_rejected(self):
+        variable = GOOD.replace(
+            ":root{--ink:#1b1d21;--ground:#ffffff;--edge:#5a5f66;--focus:#0b57d0}",
+            ":root{--ink:color-mix(in srgb, black 90%, white);"
+            "--ground:#ffffff;--edge:#5a5f66;--focus:#0b57d0}")
+        self.assertEqual(self.check("color-mix-token", variable), set())
+
+        direct = GOOD.replace(
+            "</style>", "p{color:color-mix(in srgb, black 90%, white)}</style>")
+        self.assertIn("literal", self.check("color-mix-direct", direct))
+
     def test_each_check_rejects_its_defect(self):
         for check, (body, rule, root) in BAD.items():
             with self.subTest(check):

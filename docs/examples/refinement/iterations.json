@@ -1,0 +1,136 @@
+{
+  "format_version": 1,
+  "contract": {
+    "scope_id": "desktop-evidence-fixture-v1",
+    "goal": {
+      "score": 9,
+      "fraction": 0.8
+    },
+    "points": [
+      {"id": "hierarchy", "selected": true},
+      {"id": "job_completion", "selected": true},
+      {"id": "truthful_state", "selected": true},
+      {"id": "layout", "selected": true},
+      {"id": "accessibility", "selected": true}
+    ],
+    "feasibility": {
+      "status": "unknown",
+      "assumptions": [
+        "No validated bound predicts score gains from a coherent redesign.",
+        "This synthetic ledger does not prove that the declared quality goal is feasible."
+      ]
+    },
+    "required_scenarios": [
+      {
+        "id": "desktop-light-dense",
+        "theme": "light",
+        "viewport": "desktop-1920-css",
+        "state": "dense",
+        "evidence_type": "rendered_check"
+      },
+      {
+        "id": "desktop-dark-dense",
+        "theme": "dark",
+        "viewport": "desktop-1920-css",
+        "state": "dense",
+        "evidence_type": "rendered_check"
+      },
+      {
+        "id": "css-reflow-320",
+        "theme": "light",
+        "viewport": "320-css-pixels",
+        "state": "dense",
+        "evidence_type": "css_viewport"
+      },
+      {
+        "id": "held-out-error-task",
+        "theme": "light",
+        "viewport": "desktop-1920-css",
+        "state": "long-text-error",
+        "evidence_type": "scripted_task"
+      }
+    ],
+    "task_budgets": {
+      "open-held-out-error": 1
+    },
+    "attempt_limit": 1,
+    "no_gain_limit": 1,
+    "elapsed_minutes": null,
+    "review_effort_minutes": null,
+    "verification_elapsed_seconds": 1.68
+  },
+  "artifacts": {
+    "baseline-source": {
+      "path": "baseline-source.json",
+      "sha256": "6c67812f139c681fa48d26eafc13985be0bbd3cff49269f5df8ad690ff636be1"
+    },
+    "redesign-source": {
+      "path": "redesign-source.json",
+      "sha256": "f39c09d220f3f7af3f0b2a9467f3b170a9b665c4348bbeceaeff2c8529bea441"
+    },
+    "baseline-checks": {
+      "path": "baseline-checks.json",
+      "sha256": "36665c025a7a11cdf2683e11a472b13edfa6d808d2bc155d3a57dc4234894675"
+    },
+    "redesign-checks": {
+      "path": "redesign-checks.json",
+      "sha256": "74cfc3eb636d5bf1168a8bee598f134bd5e878013ded3a07aadaa8b69e0252e6"
+    },
+    "baseline-scores": {
+      "path": "baseline-scores.json",
+      "sha256": "b2e468e984d6e76cc46a2443aca8a8c870b13a43a04ba074ed0aa5556886a663"
+    },
+    "redesign-scores": {
+      "path": "redesign-scores.json",
+      "sha256": "587c97036d01319fb6c20a94d15ab50b21d236738d424b3bf5047cd168165e34"
+    },
+    "attempt-1-proposal": {
+      "path": "attempt-1-proposal.json",
+      "sha256": "c92235405eec550d4f636f58850d00540defca605c36557a94c5c1635fb75cc0"
+    },
+    "attempt-1-decision": {
+      "path": "attempt-1-decision.json",
+      "sha256": "d58080ffa2649a08829d7c1146ed6433a5e8ef0f5c4598fbcf21d28a67d71142"
+    }
+  },
+  "baseline": {
+    "scope_id": "desktop-evidence-fixture-v1",
+    "build_id": "baseline-html-1",
+    "source_ref": "baseline-source",
+    "scores_ref": "baseline-scores",
+    "checks_ref": "baseline-checks"
+  },
+  "iterations": [
+    {
+      "id": 1,
+      "proposal_ref": "attempt-1-proposal",
+      "decision_ref": "attempt-1-decision",
+      "hypothesis": "A coherent navigation and content redesign will improve hierarchy and task completion.",
+      "dimensions": ["hierarchy", "job_completion"],
+      "expected_gain": {
+        "hierarchy": 1,
+        "job_completion": 1
+      },
+      "before": {
+        "source_ref": "baseline-source",
+        "scores_ref": "baseline-scores",
+        "checks_ref": "baseline-checks"
+      },
+      "after": {
+        "source_ref": "redesign-source",
+        "scores_ref": "redesign-scores",
+        "checks_ref": "redesign-checks"
+      },
+      "reviewer_kind": "generator_self_assessment",
+      "decision": "keep",
+      "provisional": true,
+      "reason": "Both illustrative target scores rose by the predeclared one point, with full synthetic check coverage and no task-click regression.",
+      "retained_source_ref": "redesign-source"
+    }
+  ],
+  "stop": {
+    "reason": "iteration_cap",
+    "reason_text": "The declared one-attempt cap was reached. A fresh independent review is still required.",
+    "retained_source_ref": "redesign-source"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "status": "pass",
+  "full_coverage": true,
+  "commands": [
+    {
+      "command": "python3 .github/skills/ui-prototype-council/render_check.py --rubric docs/examples/refinement/rubric.json --expect docs/examples/refinement/expected.json --tasks docs/examples/refinement/tasks.json docs/examples/refinement/alternatives/baseline/index.html docs/examples/refinement/alternatives/redesign/index.html",
+      "status": "pass",
+      "exit_code": 0,
+      "output_summary": "Chrome 157.0.8103.39; baseline: ok (0 finding(s)); task open-held-out-error: 1 click (budget 1)."
+    }
+  ],
+  "scenarios": [
+    "desktop-light-dense",
+    "desktop-dark-dense",
+    "css-reflow-320",
+    "held-out-error-task"
+  ],
+  "scenario_evidence": [
+    {
+      "id": "desktop-light-dense",
+      "status": "pass",
+      "evidence_type": "rendered_check",
+      "build_id": "baseline-html-1"
+    },
+    {
+      "id": "desktop-dark-dense",
+      "status": "pass",
+      "evidence_type": "rendered_check",
+      "build_id": "baseline-html-1"
+    },
+    {
+      "id": "css-reflow-320",
+      "status": "pass",
+      "evidence_type": "css_viewport",
+      "build_id": "baseline-html-1"
+    },
+    {
+      "id": "held-out-error-task",
+      "status": "pass",
+      "evidence_type": "scripted_task",
+      "build_id": "baseline-html-1"
+    }
+  ],
+  "findings": [],
+  "tasks": {
+    "open-held-out-error": {
+      "status": "pass",
+      "clicks": 1,
+      "budget": 1
+    }
+  },
+  "observations": []
+}

@@ -17,6 +17,22 @@ TOOLS = ROOT / ".github/skills/ui-prototype-council"
 
 @unittest.skipUnless(Path(CHROME).exists(), "installed Chrome is required")
 class CapturedAdoptionTest(unittest.TestCase):
+    def test_refinement_example_checks_both_alternatives_under_one_scope(self):
+        example = ROOT / "docs/examples/refinement"
+        result = subprocess.run(
+            [sys.executable, str(TOOLS / "render_check.py"),
+             "--rubric", str(example / "rubric.json"),
+             "--expect", str(example / "expected.json"),
+             "--tasks", str(example / "tasks.json"),
+             str(example / "alternatives/baseline/index.html"),
+             str(example / "alternatives/redesign/index.html")],
+            capture_output=True, text=True, timeout=120, cwd=ROOT,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("baseline/index.html: ok (0 finding(s))", result.stdout)
+        self.assertIn("redesign/index.html: ok (0 finding(s))", result.stdout)
+        self.assertEqual(result.stdout.count("open-held-out-error: 1 (budget 1)"), 2)
+
     def test_prepared_captures_score_but_missing_project_gate_prevents_adoption(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

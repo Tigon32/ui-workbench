@@ -1,0 +1,9 @@
+{
+  "recorded_before_edit": true,
+  "hypothesis": "A coherent navigation and content redesign will improve hierarchy and task completion.",
+  "dimensions": ["hierarchy", "job_completion"],
+  "expected_gain": {
+    "hierarchy": 1,
+    "job_completion": 1
+  }
+}

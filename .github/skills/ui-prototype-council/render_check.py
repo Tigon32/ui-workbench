@@ -162,7 +162,7 @@ AUDIT = r"""
     el.blur();
   }
 
-  const literal = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/i;
+  const literal = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color(?:-mix)?)\(/i;
   const hover = [], focusSel = new Set();
   const walk = (rules) => { for (const rule of rules) {
     if (rule.cssRules && !rule.selectorText) { walk(rule.cssRules); continue; }
