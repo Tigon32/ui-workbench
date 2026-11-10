@@ -1,4 +1,7 @@
+import hashlib
 import importlib.util
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +11,7 @@ SPEC = importlib.util.spec_from_file_location(
     "round_prep", ROOT / ".github/skills/ui-prototype-council/round_prep.py")
 ROUND_PREP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ROUND_PREP)
+CHROME = os.environ.get("CHROME", ROUND_PREP.RENDER.DEFAULT_CHROME)
 
 
 class RoundPrepTest(unittest.TestCase):
@@ -60,6 +64,81 @@ class RoundPrepTest(unittest.TestCase):
                 ROUND_PREP.create_item_directory(blind, "ABC")
 
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
+
+    def test_invalid_rubric_is_rejected_before_output_directories_are_created(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            rubric = root / "rubric.json"
+            rubric.write_text(json.dumps({
+                "renderer": "native",
+                "target_platforms": {
+                    "mobile": True, "tablet": False, "laptop": False,
+                    "desktop": False, "wide": False,
+                },
+                "target_platform_decision": "Unsupported renderer.",
+            }), encoding="utf-8")
+            run, blind = root / "run", root / "blind"
+
+            result = ROUND_PREP.main([
+                "prepare", "--run", str(run), "--round", "1",
+                "--blind", str(blind), "--seed", "1", "--model", "test",
+                "--keep", "1", "--strong", "item", "--weak", "item",
+                "--rubric", str(rubric), "item=missing",
+            ])
+
+            self.assertEqual(result, 2)
+            self.assertFalse(run.exists())
+            self.assertFalse(blind.exists())
+
+    @unittest.skipUnless(Path(CHROME).exists(), "installed Chrome is required")
+    def test_rubric_prepare_records_local_capture_and_source_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            item = root / "item"
+            item.mkdir()
+            page = item / "index.html"
+            page.write_text(
+                '<!doctype html><html lang="en"><title>One</title><body>'
+                '<main id="ready"><h1>Review</h1><button type="button">Reset</button></main>'
+                '</body></html>', encoding="utf-8")
+            (item / "DESIGN.md").write_text("Local design.", encoding="utf-8")
+            rubric = root / "rubric.json"
+            rubric.write_text(json.dumps({
+                "target_platforms": {
+                    "mobile": True, "tablet": False, "laptop": False,
+                    "desktop": False, "wide": False,
+                },
+                "target_platform_decision": "Check the mobile CSS profile.",
+            }), encoding="utf-8")
+            run, blind = root / "run", root / "blind"
+            result = ROUND_PREP.main([
+                "prepare", "--run", str(run), "--round", "1",
+                "--blind", str(blind), "--seed", "1", "--model", "test",
+                "--keep", "1", "--strong", "item", "--weak", "item",
+                "--chrome", CHROME, "--rubric", str(rubric),
+                "--state", "ready=#ready", f"item={item}",
+            ])
+
+            self.assertEqual(result, 0)
+            metadata = json.loads((run / "round-1" / "round.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["target_profiles"]["profiles"], {"mobile": 390})
+            self.assertEqual(metadata["target_profiles"]["widths"], [390])
+            self.assertEqual(metadata["target_profiles"]["reflow"], {
+                "width": 320, "label": "zoom/reflow (not phone)",
+            })
+            self.assertEqual(metadata["source_sha256"][metadata["items"][0]],
+                             hashlib.sha256(page.read_bytes()).hexdigest())
+            self.assertEqual(metadata["rubric_sha256"],
+                             hashlib.sha256(rubric.read_bytes()).hexdigest())
+            self.assertTrue(metadata["evidence_manifest"])
+            for record in metadata["evidence_manifest"].values():
+                capture = Path(record["path"])
+                self.assertTrue(capture.is_file())
+                self.assertEqual(record["sha256"], hashlib.sha256(capture.read_bytes()).hexdigest())
+            self.assertTrue(any("reflow-zoom-320.png" in ref
+                                for ref in metadata["evidence_manifest"]))
+            self.assertTrue(any("state-ready-mobile-390.png" in ref
+                                for ref in metadata["evidence_manifest"]))
 
 
 if __name__ == "__main__":
