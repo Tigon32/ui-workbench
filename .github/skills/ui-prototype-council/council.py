@@ -28,6 +28,10 @@ from pathlib import Path
 MIN_REASON = 20
 MIN_VALID_REVIEWERS = 2
 
+SPEC = importlib.util.spec_from_file_location("scope_intake", Path(__file__).with_name("intake.py"))
+INTAKE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(INTAKE)
+
 
 class RunError(Exception):
     pass
@@ -382,6 +386,46 @@ def score_round(rubric, dims, round_dir, previous_keep):
     references = check_evidence(meta, items, round_dir) if rules >= 3 else None
     if rules >= 3:
         check_profile_evidence(meta, round_dir)
+    scope_lines = ["Scope: undeclared (legacy)", ""]
+    if "scope_refs" in meta:
+        refs = meta["scope_refs"]
+        if not isinstance(refs, dict) or set(refs) != {"brief", "directions"}:
+            raise RunError("scope_refs must bind brief and directions")
+        scope_data = {}
+        scope_paths = {}
+        manifest = meta.get("evidence_manifest", {})
+        for key, ref in refs.items():
+            record = manifest.get(ref)
+            if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+                raise RunError(f"scope {key} evidence is missing")
+            path = Path(record["path"])
+            path = path if path.is_absolute() else round_dir / path
+            try:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError as error:
+                raise RunError(f"scope {key} evidence unavailable: {error}") from error
+            if record.get("sha256") != digest:
+                raise RunError(f"scope {key} evidence digest changed")
+            scope_data[key] = load(path)
+            scope_paths[key] = path
+        directions = scope_data["directions"]
+        if (not isinstance(directions, list)
+                or not all(isinstance(row, dict) for row in directions)
+                or {row.get("id") for row in directions} != {reveal[item] for item in contestants}
+                or len(directions) != len(contestants)):
+            raise RunError("scope directions must match all non-calibration prototypes")
+        scoped = INTAKE.validate(
+            scope_data["brief"], root=scope_paths["brief"].parent,
+            current_brief_path=scope_paths["brief"], directions=directions)
+        blockers = [row["message"] for row in scoped["findings"] if row["severity"] == "blocker"]
+        if blockers:
+            raise RunError("invalid scope intake: " + "; ".join(blockers))
+        scope_lines = [scoped["scope_header"], ""]
+        for name, coverage in scoped["directions"].items():
+            scope_lines.append(
+                f"- {name}: covered {coverage['covered']}/{coverage['total']}; "
+                f"reachable {coverage['reachable']}/{coverage['total']} (declared, separate from craft)")
+        scope_lines.append("")
 
     sheets = sorted(round_dir.glob("reviewer-*.json"))
     if not sheets or len(sheets) > caps["max_reviewers"]:
@@ -397,7 +441,7 @@ def score_round(rubric, dims, round_dir, previous_keep):
     if len(items) > 2 and len(set(orders)) != len(orders):
         raise RunError(f"{round_dir}: reviewers must see different shuffled orders")
 
-    lines = [f"# Round {meta['round']}", "",
+    lines = [f"# Round {meta['round']}", "", *scope_lines,
              f"Model: {meta['model']}. Browser: {meta['browser']}. Date: {meta['date']}.",
              f"Reviewers: {len(loaded)}. Calibration margin required: "
              f"{fmt(rubric['calibration_margin'])}.", "", "## Calibration", "",

@@ -1,5 +1,5 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "brief_version": "2.0",
   "selection_policy": "compare_compatible_inputs_only",
   "input_revisions": {
@@ -39,6 +39,8 @@
   "directions": [
     {
       "id": "chronological-stream",
+      "view_coverage": [{"view_id": "evidence", "status": "covered", "evidence_refs": ["synthetic-job-record"]}],
+      "keep_dispositions": [{"id": "provenance", "disposition": "keep", "evidence_refs": ["synthetic-job-record"]}],
       "title": "Chronological evidence stream",
       "organizing_principle": "Keep findings in time order and attach provenance and uncertainty to each event.",
       "eligible": true,
@@ -62,6 +64,8 @@
     },
     {
       "id": "evidence-workspace",
+      "view_coverage": [{"view_id": "evidence", "status": "covered", "evidence_refs": ["synthetic-job-record"]}],
+      "keep_dispositions": [{"id": "provenance", "disposition": "keep", "evidence_refs": ["synthetic-job-record"]}],
       "title": "Evidence workspace",
       "organizing_principle": "Group records by investigation and expose source relationships alongside a selected item.",
       "eligible": true,
@@ -85,6 +89,8 @@
     },
     {
       "id": "color-only-variant",
+      "view_coverage": [],
+      "keep_dispositions": [],
       "title": "Blue version of the chronological stream",
       "organizing_principle": "Retain the chronological stream and change only its color theme.",
       "eligible": false,

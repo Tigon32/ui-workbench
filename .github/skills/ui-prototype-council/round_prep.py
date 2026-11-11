@@ -31,6 +31,9 @@ HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("render_check", HERE / "render_check.py")
 RENDER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RENDER)
+SPEC = importlib.util.spec_from_file_location("scope_intake", HERE / "intake.py")
+INTAKE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(INTAKE)
 
 VIEWS = (("light", False, 1280), ("dark", False, 1280))
 CAPTURE_STATE_WIDTH = 1280
@@ -101,6 +104,25 @@ def prepare(args):
         raise SystemExit("round-prep: each item must be NAME=FOLDER") from error
     if len(items) != len(args.items):
         raise SystemExit("round-prep: item names must be unique")
+    scoped_files = {}
+    if args.brief:
+        if not args.directions:
+            raise SystemExit("round-prep: --brief requires --directions with scope/KEEP evidence")
+        brief = json.loads(args.brief.read_text(encoding="utf-8"))
+        directions = json.loads(args.directions.read_text(encoding="utf-8"))
+        if not isinstance(directions, list) or not all(isinstance(row, dict) for row in directions):
+            raise SystemExit("round-prep: --directions must contain a direction list")
+        expected = set(items) - {args.strong, args.weak}
+        if {row.get("id") for row in directions} != expected or len(directions) != len(expected):
+            raise SystemExit("round-prep: directions must name every non-calibration item exactly once")
+        scope_report = INTAKE.validate(
+            brief, root=args.brief.parent, current_brief_path=args.brief, directions=directions)
+        blockers = [row["message"] for row in scope_report["findings"] if row["severity"] == "blocker"]
+        if blockers:
+            raise SystemExit("round-prep: " + "; ".join(blockers))
+        scoped_files = {"project/brief": args.brief, "project/directions": args.directions}
+    elif args.directions:
+        raise SystemExit("round-prep: --directions requires --brief")
     for name in (args.strong, args.weak):
         if name not in items:
             raise SystemExit(f"round-prep: calibration item {name} is not listed")
@@ -209,6 +231,13 @@ def prepare(args):
             }
             for path in sorted(args.blind.glob("*/*.png"))
         }
+    if scoped_files:
+        meta.setdefault("evidence_manifest", {}).update({
+            reference: {"path": str(path.resolve()),
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            for reference, path in scoped_files.items()
+        })
+        meta["scope_refs"] = {"brief": "project/brief", "directions": "project/directions"}
     (round_dir / "round.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     (args.blind / "sealed.json").write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
     # Rotations of one seeded shuffle: every reviewer sees a different order, and each
@@ -254,6 +283,9 @@ def main(argv=None):
     prep.add_argument("--chrome", default=RENDER.DEFAULT_CHROME)
     prep.add_argument("--rubric", type=Path,
                       help="shared JSON rubric with bounded web target profiles and optional quality checks")
+    prep.add_argument("--brief", type=Path, help="canonical sponsor-confirmed scoped project brief")
+    prep.add_argument("--directions", type=Path,
+                      help="JSON list of non-calibration directions with view coverage and KEEP dispositions")
     prep.add_argument("--state", action="append", default=[], type=parse_state,
                       metavar="LABEL=#FRAGMENT",
                       help="also capture the page opened at this URL fragment, in light at 1280 pixels")

@@ -95,6 +95,81 @@ Unsupported native or human evidence remains explicit, not a browser pass.
 
 ## Score semantics
 
+### Scope intake and paired refinement (issue #13)
+
+New exploration format 2 references the canonical brief's version-1
+[scope intake](../.github/skills/what-council-exploration/intake.schema.json).
+Scope confirmation, KEEP and inventory precede layout. Product work starts
+with shells/IA and journeys, then coverage, data display/density and craft.
+Sponsor authority cannot be delegated away by a council ruling. Stale brief
+reuse requires explicit fresh reconfirmation; undeclared history is not
+detectable. Domain artifact paths remain opaque, with explicit data classes.
+
+New selection preparation can bind brief/directions files; selection and
+refinement reports show scope independently of craft. Content coverage counts
+only `covered`, while a labelled shell stub establishes reachability alone.
+Refinement without current coverage evidence is `partial-scope` when it has
+in-scope views, even if its local quality goal is met. Legacy runs disclose
+undeclared scope and do not silently acquire product claims.
+
+Format-2 refinement may opt into `contract.keep_rule`:
+
+```json
+{
+  "id": "multi_gain_v2",
+  "min_improved": 3,
+  "min_gain": 1,
+  "noise_band": 0.5,
+  "panel": {
+    "reviewers": [{"id": "example", "kind": "generator_self_assessment", "model": "project-configured"}],
+    "repeats": 2
+  }
+}
+```
+
+These are illustrative project-owned values, not defaults. This rule requires
+scoped intake. Each attempt binds `paired_scores_ref` in actual evidence:
+
+```json
+{
+  "schema_version": 1,
+  "attempt_id": 1,
+  "rule_id": "multi_gain_v2",
+  "panel_id": "unique-review-session",
+  "panel": {
+    "reviewers": [{"id": "example", "kind": "generator_self_assessment", "model": "project-configured"}],
+    "repeats": 2
+  },
+  "before_source_ref": "retained-source",
+  "after_source_ref": "candidate-source",
+  "points": {
+    "example-point": {"baseline": [6, 6], "candidate": [8, 8]}
+  }
+}
+```
+
+Use the complete before/after point union, including untargeted guards, with
+reviewer-major/repeat-minor arrays. Null evidence prevents keeping. Individual
+scores remain integer 1-10; means/variance may be fractional. Proposal freezes
+the rule/panel before editing; decision summary binds the paired artifact SHA.
+Gains must meet declared minimums and strictly exceed the noise band, while
+any regression vetoes keeping. Flat co-targets remain explicit unmet targets.
+Historical-to-baseline drift is separate from candidate gain. A panel
+attestation cannot prove that independent calls occurred, and repeated
+same-model scores measure model variance, not human confidence.
+
+`scope_challenge` stops polishing when sponsor feedback names missing scope.
+It binds a feedback artifact containing quote, actor, date and matching
+`missing_scope` inventory ids. Revisit scope with the sponsor, not the rubric.
+This stop never constitutes adoption.
+
+Consumer component-library lessons are conditional HOW context: reuse approved
+components and shared type/radius/density/spacing/motion tokens, choose behavioral
+foundations or specialists only for an actual need, and keep decoration
+subordinate to tasks. Static prototypes still use offline HTML/CSS and system
+fonts: no React dependency, registry fetch or external skill installation.
+A library is not an accessibility or licensing approval.
+
 Every dimension uses integer scores from 1 to 10.
 Anchors at 3, 5, 7 and 9 describe increasingly strong observed quality.
 Scores 2, 4, 6 and 8 lie between anchors.

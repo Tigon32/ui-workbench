@@ -90,6 +90,18 @@ class RoundPrepTest(unittest.TestCase):
             self.assertFalse(run.exists())
             self.assertFalse(blind.exists())
 
+    def test_scoped_prepare_refuses_missing_direction_evidence_before_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            result_args = [
+                "prepare", "--run", str(root / "run"), "--round", "1",
+                "--blind", str(root / "blind"), "--seed", "1", "--model", "test",
+                "--keep", "1", "--strong", "item", "--weak", "item",
+                "--brief", "project.json", "item=missing"]
+            with self.assertRaisesRegex(SystemExit, "requires --directions"):
+                ROUND_PREP.main(result_args)
+            self.assertFalse((root / "blind").exists())
+
     @unittest.skipUnless(Path(CHROME).exists(), "installed Chrome is required")
     def test_rubric_prepare_records_local_capture_and_source_evidence(self):
         with tempfile.TemporaryDirectory() as temp:

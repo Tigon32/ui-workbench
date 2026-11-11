@@ -1,10 +1,12 @@
 """Contract tests for the local what-council concept handoff."""
 
 import copy
+import hashlib
 import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -98,6 +100,9 @@ class WhatCouncilTest(unittest.TestCase):
             "kind": "sponsor_approval",
             "reference": "synthetic approval record",
             "description": "A fictional, local example approval.",
+            "quote": "Fictional sponsor accepts this example target.",
+            "date": "2026-11-11",
+            "actor": "fictional-example-sponsor",
         })
         decision = next(item for item in brief["decision_authority"]["decisions"]
                         if item["id"] == "project-quality-goal")
@@ -170,12 +175,12 @@ class WhatCouncilTest(unittest.TestCase):
         self.assertIn("incompatible_comparison_tasks", self.codes(report))
 
     def test_selected_candidate_routes_to_existing_format_2_refinement(self):
-        route = WHAT_COUNCIL.refinement_route(self.exploration, "evidence-workspace")
+        route = WHAT_COUNCIL.refinement_route(self.exploration, "evidence-workspace", self.brief)
         self.assertEqual(route["skill"], "ui-prototype-council")
         self.assertEqual(route["format_version"], 2)
         self.assertEqual(route["canonical_brief_ref"], "project-intake-v2.json")
         with self.assertRaises(WHAT_COUNCIL.HandoffError):
-            WHAT_COUNCIL.refinement_route(self.exploration, "color-only-variant")
+            WHAT_COUNCIL.refinement_route(self.exploration, "color-only-variant", self.brief)
 
     def test_same_model_council_requires_disclosure_and_reports_limitation(self):
         brief = copy.deepcopy(self.brief)
@@ -216,9 +221,96 @@ class WhatCouncilTest(unittest.TestCase):
                 self.assertIn('"action_executed": false', result.stdout)
 
     def test_approval_reference_preflight_never_executes_the_action(self):
-        result = WHAT_COUNCIL.preflight("provider-call", "synthetic-approval-record")
+        result = WHAT_COUNCIL.preflight("provider-call", "synthetic-approval-record", "synthetic")
         self.assertEqual(result["status"], "preflight-passed")
         self.assertFalse(result["action_executed"])
+
+    def test_scoped_intake_cannot_be_omitted_and_legacy_cannot_route(self):
+        del self.brief["intake"]
+        report = WHAT_COUNCIL.validate(self.brief, self.exploration)
+        self.assertIn("scope_unconfirmed", self.codes(report))
+        self.exploration["format_version"] = 1
+        legacy = WHAT_COUNCIL.validate(self.brief, self.exploration)
+        self.assertFalse(legacy["prototype_selection_ready"])
+        with self.assertRaises(WHAT_COUNCIL.HandoffError):
+            WHAT_COUNCIL.refinement_route(self.exploration, "evidence-workspace", self.brief)
+
+    def test_scope_and_primary_job_questions_cannot_be_parked(self):
+        self.brief["unresolved_questions"] = [
+            {"id": "job", "topic": "primary_job", "blocks": "nothing"}]
+        report = WHAT_COUNCIL.validate(self.brief, self.exploration)
+        self.assertIn("scope_question_parked", self.codes(report))
+
+    def test_missing_keep_and_uncovered_views_have_explicit_gate_messages(self):
+        del self.brief["intake"]["keep"]
+        self.exploration["directions"][0]["view_coverage"][0]["status"] = "placeholder"
+        report = WHAT_COUNCIL.validate(self.brief, self.exploration)
+        self.assertIn("keep_list_missing", self.codes(report))
+        self.assertIn("scope_coverage", self.codes(report))
+        self.assertEqual(report["direction_coverage"]["chronological-stream"]["covered"], 0)
+        self.assertIn("Scope: page", report["scope_header"])
+
+    def test_keep_dispositions_cannot_drop_preserved_behavior(self):
+        self.exploration["directions"][0]["keep_dispositions"][0]["disposition"] = "drop"
+        report = WHAT_COUNCIL.validate(self.brief, self.exploration)
+        self.assertIn("invalid_keep_disposition", self.codes(report))
+
+    def test_component_intake_remains_lightweight_and_artifacts_are_not_opened(self):
+        intake = self.brief["intake"]
+        intake["scope"]["level"] = "component"
+        intake["views"] = []
+        intake["quality_targets"] = {"component": "Preserve the labelled action."}
+        intake["artifacts"] = [{"path": "/not/read/secret.bpmn", "data_class": "confidential"}]
+        for direction in self.exploration["directions"]:
+            direction["view_coverage"] = []
+        report = WHAT_COUNCIL.validate(self.brief, self.exploration)
+        self.assertEqual(report["handoff_status"], "exploratory")
+        self.assertIn("Scope: component", report["scope_header"])
+
+    def test_product_shell_stubs_are_reachable_but_never_content_coverage(self):
+        intake = self.brief["intake"]
+        intake["scope"].update({"level": "product", "stage": "shell"})
+        intake["views"].append({"id": "settings", "disposition": "in", "capture_refs": ["synthetic-job-record"]})
+        intake["journeys"] = [{"id": name, "view_ids": ["evidence", "settings"]} for name in ("inspect", "configure")]
+        intake["no_artifacts_reason"] = "Synthetic example has no domain diagrams."
+        intake["quality_targets"]["product"] = "Both journeys remain reachable."
+        for direction in self.exploration["directions"]:
+            if direction["eligible"]:
+                direction["view_coverage"].append({"view_id": "settings", "status": "labelled_stub", "evidence_refs": ["synthetic-job-record"]})
+        report = WHAT_COUNCIL.validate(self.brief, self.exploration)
+        self.assertEqual(report["coverage"]["covered"], 1)
+        self.assertEqual(report["coverage"]["reachable"], 2)
+        self.assertEqual(report["handoff_status"], "exploratory")
+
+    def test_version_bump_does_not_hide_stale_brief_and_reconfirmation_is_explicit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "old.json"
+            path.write_text(json.dumps(self.brief))
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            self.brief["brief_version"] = "2.1"
+            self.exploration["brief_version"] = "2.1"
+            self.brief["intake"]["prior_briefs"] = [{
+                "id": "prior", "path": str(path), "sha256": digest,
+                "round": 1, "purpose": "page exploration", "date": "2026-11-10",
+                "confirmation_ref": "old-scope"}]
+            report = WHAT_COUNCIL.validate(self.brief, self.exploration)
+            self.assertIn("brief_stale", self.codes(report))
+            self.brief["intake"]["scope"]["sponsor_confirmation"]["reconfirms"] = [digest]
+            self.assertNotIn("brief_stale", self.codes(WHAT_COUNCIL.validate(self.brief, self.exploration)))
+
+    def test_agent_scope_narrowing_and_enum_bypass_are_blocked(self):
+        self.brief["what_council"]["objections"][0]["topic"] = "scope"
+        ruling = self.brief["what_council"]["rulings"][0]
+        ruling.update({"status": "deferred_noncritical", "decision_owner": "agent"})
+        self.brief["decision_authority"]["decisions"][1]["owner"] = "Sponsor"
+        report = WHAT_COUNCIL.validate(self.brief, self.exploration)
+        self.assertIn("judge_exceeded_authority", self.codes(report))
+        self.assertIn("invalid_authority_enum", self.codes(report))
+
+    def test_preflight_has_no_synthetic_or_unknown_class_fallback(self):
+        for data_class in (None, "whatever"):
+            result = WHAT_COUNCIL.preflight("data-sharing", "declared-approval", data_class)
+            self.assertEqual(result["status"], "denied")
 
 
 if __name__ == "__main__":

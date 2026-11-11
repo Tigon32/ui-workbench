@@ -91,6 +91,14 @@ grant external-call authorization. The local validator and all-synthetic
 example are documented in
 [`docs/examples/concept-exploration`](docs/examples/concept-exploration/README.md).
 
+New exploration format 2 starts with sponsor-confirmed component/page/flow/product
+scope, not an earlier brief. The [tiered intake schema](.github/skills/what-council-exploration/intake.schema.json)
+keeps component work lightweight while requiring view coverage, KEEP dispositions
+and journeys at broader scopes. Reports separate declared coverage from craft.
+Legacy unscoped exploration remains readable but cannot generate a scoped handoff.
+Optional paired refinement keeps meaningful multi-dimension gains without a flat
+co-target veto and reports panel drift; existing ledgers retain their old rules.
+
 ## Checks
 
 The prototype tools use Python's standard library. Run their tests with:

@@ -86,6 +86,33 @@ class CouncilTest(unittest.TestCase):
         run = self.make([self.round_of([scores, scores])])
         self.assertEqual(self.verdict(run), ("WINNER", ["p-A"]))
 
+    def test_scope_report_is_bound_to_intake_and_separate_from_craft(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        run = self.make([self.round_of([scores, scores])])
+        example = ROOT / "docs/examples/concept-exploration"
+        brief = json.loads((example / "project-intake-v2.json").read_text())
+        direction = json.loads((example / "exploration.json").read_text())["directions"][0]
+        directions = [{**direction, "id": f"p-{name}"} for name in ("A", "B", "C")]
+        manifest = {}
+        for key, data in (("brief", brief), ("directions", directions)):
+            path = run / f"{key}.json"
+            path.write_text(json.dumps(data))
+            manifest[f"project/{key}"] = {
+                "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        meta_path = run / "round-1/round.json"
+        meta = json.loads(meta_path.read_text())
+        meta.update({"evidence_manifest": manifest,
+                     "scope_refs": {"brief": "project/brief", "directions": "project/directions"}})
+        meta_path.write_text(json.dumps(meta))
+        self.assertEqual(self.verdict(run), ("WINNER", ["p-A"]))
+        rendered = (run / "round-1/report.md").read_text()
+        self.assertIn("Scope: page", rendered)
+        self.assertIn("covered 1/1", rendered)
+        self.assertIn("separate from craft", rendered)
+        (run / "brief.json").write_text("{}")
+        with self.assertRaisesRegex(COUNCIL.RunError, "digest changed"):
+            COUNCIL.run(run, write=True)
+
     def test_lead_inside_disagreement_continues_and_eliminates(self):
         one = {"A": (8, 8), "B": (7, 7), "C": (3, 3), "W": (2, 2), "S": (9, 9)}
         two = {"A": (6, 6), "B": (7, 7), "C": (3, 3), "W": (2, 2), "S": (9, 9)}

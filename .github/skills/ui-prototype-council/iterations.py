@@ -5,12 +5,16 @@ import argparse
 import base64
 import hashlib
 import html
+import importlib.util
 import json
 import math
 import sys
 import zlib
 from pathlib import Path
 
+SPEC = importlib.util.spec_from_file_location("scope_intake", Path(__file__).with_name("intake.py"))
+INTAKE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(INTAKE)
 
 class LedgerError(ValueError):
     """A ledger or one of its referenced artifacts is invalid."""
@@ -23,7 +27,11 @@ REVIEWER_KINDS = {
     "assistive_technology_evidence",
 }
 DECISIONS = {"keep", "revert", "blocked"}
-STOP_REASONS = {"target_provisionally_met", "no_gain", "iteration_cap", "blocked", "budget"}
+STOP_REASONS = {
+    "target_provisionally_met", "no_gain", "iteration_cap", "blocked", "budget",
+    "scope_challenge",
+}
+SPONSOR_ATTESTATIONS = {"sponsor", "delegate_with_sponsor_reference"}
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 MAX_CAPTURE_PIXELS = 40_000_000
@@ -524,7 +532,133 @@ def _validate_v2_contract(root, contract, artifacts, points):
                  "changed goal, inventory, rubric or scope cannot be silently compared as compatible")
         _require(not (changed and not mapping["reason"]),
                  "incompatible comparisons need an explicit reason")
+    if "intake" in brief:
+        intake_report = INTAKE.validate(
+            brief, root=root, current_brief_path=root / artifacts[brief_ref]["path"])
+        blockers = [row["message"] for row in intake_report["findings"] if row["severity"] == "blocker"]
+        _require(not blockers, "invalid scoped intake: " + "; ".join(blockers))
     return brief, history, mappings
+
+
+KEEP_RULE_IDS = {"multi_gain_v2"}
+
+
+def _validate_keep_rule_contract(contract):
+    """Validate the opt-in format-2 ``contract.keep_rule`` block, if present.
+
+    Absence preserves the strict, all-declared-targets keep semantics. When
+    present, it declares the ``multi_gain_v2`` rule: keep a candidate that
+    clears ``min_gain`` and ``noise_band`` on at least ``min_improved`` of its
+    declared targets, with no paired regression anywhere, as measured by a
+    fixed reviewer panel re-scoring both sources together.
+    """
+    rule = contract.get("keep_rule")
+    if rule is None:
+        return None
+    _require(isinstance(rule, dict) and rule.get("id") in KEEP_RULE_IDS,
+             "contract.keep_rule must declare a supported rule id")
+    _require(type(rule.get("min_improved")) is int and rule["min_improved"] >= 1,
+             "keep_rule.min_improved must be a positive integer")
+    _require(type(rule.get("min_gain")) in (int, float) and math.isfinite(rule["min_gain"])
+             and rule["min_gain"] > 0,
+             "keep_rule.min_gain must be a finite positive number")
+    _require(type(rule.get("noise_band")) in (int, float) and math.isfinite(rule["noise_band"])
+             and rule["noise_band"] >= 0,
+             "keep_rule.noise_band must be a finite nonnegative number")
+    panel = rule.get("panel")
+    _require(isinstance(panel, dict), "keep_rule.panel must be an object")
+    reviewers = panel.get("reviewers")
+    _require(isinstance(reviewers, list) and reviewers
+             and all(isinstance(item, dict) and set(item) == {"id", "kind", "model"}
+                     and isinstance(item.get("id"), str) and item["id"].strip()
+                     and item.get("kind") in REVIEWER_KINDS
+                     and isinstance(item.get("model"), str) and item["model"].strip()
+                     for item in reviewers),
+             "keep_rule.panel.reviewers must declare an id, kind and model for each reviewer")
+    _require(len({item["id"] for item in reviewers}) == len(reviewers),
+             "keep_rule.panel.reviewers must have unique reviewer ids")
+    _require(type(panel.get("repeats")) is int and panel["repeats"] >= 1,
+             "keep_rule.panel.repeats must be a positive integer")
+    return rule
+
+
+def _paired_scores(root, artifacts, reference, attempt_id, keep_rule,
+                   before_source_ref, after_source_ref, affected_points):
+    """Validate a hash-bound paired reassessment artifact for ``multi_gain_v2``.
+
+    Both the retained (baseline) and candidate sources are re-scored in the
+    same panel session, so the artifact binds one shared ``panel_id`` and the
+    exact declared reviewer roster (id, kind, model, order) and repeat count.
+    Scores stay integer 1-10 or null (unassessed); null anywhere blocks keep.
+    """
+    data = _artifact(root, artifacts, reference)
+    _require(isinstance(data, dict) and data.get("schema_version") == 1,
+             f"paired scores {reference!r} must be a schema-version-1 object")
+    _require(data.get("attempt_id") == attempt_id,
+             f"paired scores {reference!r} attempt identity does not match")
+    _require(data.get("rule_id") == keep_rule["id"],
+             f"paired scores {reference!r} does not cite the contract's keep_rule id")
+    _require(isinstance(data.get("panel_id"), str) and data["panel_id"].strip(),
+             f"paired scores {reference!r} needs a shared panel_id for both sources")
+    panel = data.get("panel")
+    _require(isinstance(panel, dict)
+             and panel.get("reviewers") == keep_rule["panel"]["reviewers"]
+             and panel.get("repeats") == keep_rule["panel"]["repeats"],
+             f"paired scores {reference!r} panel roster, order, kind, model or repeats "
+             "does not match the declared contract panel exactly")
+    _require(data.get("before_source_ref") == before_source_ref
+             and data.get("after_source_ref") == after_source_ref,
+             f"paired scores {reference!r} does not match this attempt's before/after sources")
+    repeats_total = len(keep_rule["panel"]["reviewers"]) * keep_rule["panel"]["repeats"]
+    points = data.get("points")
+    _require(isinstance(points, dict) and set(points) == set(affected_points),
+             f"paired scores {reference!r} must cover exactly the attempt's affected points")
+    parsed = {}
+    for point_id, pair in points.items():
+        _require(isinstance(pair, dict) and set(pair) == {"baseline", "candidate"},
+                 f"paired scores {reference!r} point {point_id!r} needs baseline and "
+                 "candidate arrays")
+        parsed[point_id] = {}
+        for side in ("baseline", "candidate"):
+            values = pair[side]
+            _require(isinstance(values, list) and len(values) == repeats_total,
+                     f"paired scores {reference!r} point {point_id!r} {side} needs exactly "
+                     f"{repeats_total} reviewer-repeat entries")
+            for value in values:
+                _require(value is None or type(value) is int and 1 <= value <= 10,
+                         f"paired scores {reference!r} point {point_id!r} {side} entries must "
+                         "be an integer from 1 to 10 or null")
+            parsed[point_id][side] = values
+    return data, parsed
+
+
+def _pair_statistics(parsed):
+    """Derive floating paired means, deltas and variance independently of
+    the integer snapshot scores; any null entry invalidates that point."""
+    stats = {}
+    for point_id, pair in parsed.items():
+        baseline, candidate = pair["baseline"], pair["candidate"]
+        if any(value is None for value in baseline + candidate):
+            stats[point_id] = {
+                "baseline_mean": None, "candidate_mean": None, "delta": None,
+                "baseline_variance": None, "candidate_variance": None, "has_null": True,
+            }
+            continue
+        baseline_mean = sum(baseline) / len(baseline)
+        candidate_mean = sum(candidate) / len(candidate)
+
+        def variance(values, mean):
+            return sum((value - mean) ** 2 for value in values) / len(values)
+
+        stats[point_id] = {
+            "baseline_mean": baseline_mean,
+            "candidate_mean": candidate_mean,
+            "delta": candidate_mean - baseline_mean,
+            "baseline_variance": variance(baseline, baseline_mean),
+            "candidate_variance": variance(candidate, candidate_mean),
+            "has_null": False,
+        }
+    return stats
 
 
 def _checks(root, artifacts, reference, required_scenarios, task_budgets, build_id):
@@ -702,8 +836,14 @@ def verify(path):
             path.parent, contract, artifacts, points)
         comparison_point_ids = list(dict.fromkeys(
             point_id for version in version_history for point_id in version["point_ids"]))
+        keep_rule_contract = _validate_keep_rule_contract(contract)
+        if keep_rule_contract:
+            _require(isinstance(brief.get("intake"), dict),
+                     "multi_gain_v2 requires a sponsor-confirmed scoped intake")
     else:
         comparison_point_ids = point_ids
+        _require("keep_rule" not in contract, "contract.keep_rule is format-2 only")
+        keep_rule_contract = None
     for field in ("elapsed_minutes", "review_effort_minutes", "verification_elapsed_seconds"):
         value = contract.get(field)
         _require(value is None or type(value) in (int, float) and math.isfinite(value) and value >= 0,
@@ -838,6 +978,9 @@ def verify(path):
                      and proposal.get("dependencies") == attempt["dependencies"]
                      and proposal.get("guardrails") == attempt["guardrails"],
                      f"attempt {expected_id} proposal must bind expected outcomes, impact, dependencies and guardrails before editing")
+        if keep_rule_contract:
+            _require(proposal.get("keep_rule") == keep_rule_contract,
+                     f"attempt {expected_id} proposal must freeze the keep rule and panel before editing")
         _require(attempt.get("before", {}).get("source_ref") == previous_source_ref,
                  f"attempt {expected_id} does not start from the preceding retained source")
         if format_version == 2:
@@ -852,6 +995,22 @@ def verify(path):
         _, new_scores, new_checks, new_findings = snapshot(
             attempt.get("after"), f"attempt {expected_id} after",
             affected_points=attempt.get("affected_points", ()))
+        paired = None
+        paired_stats = {}
+        if keep_rule_contract:
+            paired_ref = attempt.get("paired_scores_ref")
+            _require(paired_ref in attempt["actual_evidence"],
+                     f"attempt {expected_id} paired scores must appear in actual_evidence")
+            paired, parsed = _paired_scores(
+                path.parent, artifacts, paired_ref, expected_id, keep_rule_contract,
+                attempt["before"]["source_ref"], attempt["after"]["source_ref"],
+                set(old_scores["points"]) | set(new_scores["points"]))
+            paired_stats = _pair_statistics(parsed)
+            for point_id, statistics in paired_stats.items():
+                historical = old_scores["points"].get(point_id, {}).get("score")
+                statistics["baseline_drift"] = (
+                    statistics["baseline_mean"] - historical
+                    if statistics["baseline_mean"] is not None and historical is not None else None)
         attempt_comparison_status = (
             "reviewer_changed"
             if old_scores["reviewer"] != new_scores["reviewer"]
@@ -886,8 +1045,7 @@ def verify(path):
                          f"attempt {expected_id} visual evidence and captures must be in actual_evidence")
         score_changes = {}
         points_by_id = {point["id"]: point for point in points}
-        targeted_points = attempt.get(
-            "affected_points", attempt.get("dimensions", []))
+        targeted_points = dimensions
         targeted_point_ids = set(targeted_points)
         expected_gains = attempt.get("expected_gain", {})
         for point_id in comparison_point_ids:
@@ -897,6 +1055,9 @@ def verify(path):
                 continue
             before_score = before_point.get("score") if before_point else None
             after_score = after_point.get("score") if after_point else None
+            if paired:
+                before_score = paired_stats[point_id]["baseline_mean"]
+                after_score = paired_stats[point_id]["candidate_mean"]
             comparable = (
                 old_scores["reviewer"] == new_scores["reviewer"]
                 and (format_version == 1 or attempt_comparison_status == "compatible")
@@ -907,6 +1068,8 @@ def verify(path):
                 else None
             )
             point_expected_gain = expected_gains.get(point_id)
+            if keep_rule_contract and point_id in dimensions:
+                point_expected_gain = max(point_expected_gain, keep_rule_contract["min_gain"])
             score_changes[point_id] = {
                 "selected": points_by_id.get(point_id, {}).get("selected", False),
                 "targeted": point_id in targeted_point_ids,
@@ -914,7 +1077,8 @@ def verify(path):
                 "gain_status": (
                     "not_targeted" if point_id not in targeted_point_ids
                     else "not_comparable" if delta is None or point_expected_gain is None
-                    else "met" if delta >= point_expected_gain
+                    else "met" if delta >= point_expected_gain and (
+                        not keep_rule_contract or delta > keep_rule_contract["noise_band"])
                     else "missed"
                 ),
                 "before_score": before_score,
@@ -962,6 +1126,13 @@ def verify(path):
             "decision_records": attempt.get("decision_records", []),
             "comparison_status": attempt_comparison_status,
             "score_changes": score_changes,
+            "paired_panel": {
+                "panel_id": paired["panel_id"], "points": paired_stats,
+                "rule": keep_rule_contract,
+            } if paired else None,
+            "unmet_targets": [
+                key for key in dimensions if score_changes.get(key, {}).get("gain_status") != "met"
+            ],
             "visual_evidence": (
                 {"status": "not_provided"} if visual_data is None
                 else {
@@ -971,20 +1142,7 @@ def verify(path):
                     **visual_data,
                 }
             ),
-            "dimension_changes": {
-                point_id: (
-                    new_scores["points"].get(point_id, {}).get("score")
-                    - old_scores["points"].get(point_id, {}).get("score")
-                    if (old_scores["reviewer"] == new_scores["reviewer"]
-                        and (format_version == 1
-                             or attempt_comparison_status == "compatible"))
-                    and new_scores["points"].get(point_id, {}).get("score") is not None
-                    and old_scores["points"].get(point_id, {}).get("score") is not None
-                    else None
-                )
-                for point_id in comparison_point_ids
-                if point_id in old_scores["points"] or point_id in new_scores["points"]
-            },
+            "dimension_changes": {key: value["delta"] for key, value in score_changes.items()},
         })
         _require(attempt.get("reviewer_kind") == new_scores["reviewer"]["kind"],
                  f"attempt {expected_id} reviewer kind does not match score provenance")
@@ -1022,6 +1180,12 @@ def verify(path):
                     "visual_ref": visual_ref,
                     "visual_sha256": artifacts[visual_ref]["sha256"],
                 })
+            if keep_rule_contract:
+                expected_summary.update({
+                    "keep_rule": keep_rule_contract,
+                    "paired_scores_ref": attempt["paired_scores_ref"],
+                    "paired_scores_sha256": artifacts[attempt["paired_scores_ref"]]["sha256"],
+                })
             _require(decision_record.get("attempt_summary") == expected_summary,
                      f"attempt {expected_id} decision does not freeze outcomes, effort, regressions and authority")
         if visual_ref is not None:
@@ -1057,7 +1221,7 @@ def verify(path):
             _require(all(new_checks["tasks"][name]["clicks"] <= old_checks["tasks"][name]["clicks"]
                          for name in task_budgets),
                      f"attempt {expected_id} keep blocked by a task-click regression")
-            for point_id in set(old_scores["points"]) & set(new_scores["points"]):
+            for point_id in set(old_scores["points"]) & set(new_scores["points"]) if not paired else ():
                 old_value = old_scores["points"][point_id]["score"]
                 new_value = new_scores["points"][point_id]["score"]
                 _require(not (old_value is not None and new_value is None),
@@ -1076,7 +1240,16 @@ def verify(path):
                 and new_scores["points"][point_id]["score"] - old_scores["points"][point_id]["score"]
                 >= expected_gain[point_id]
                 for point_id in dimensions)
-            _require(gained, f"attempt {expected_id} keep did not meet every declared target gain")
+            if paired:
+                _require(all(not value["has_null"] for value in paired_stats.values()),
+                         f"attempt {expected_id} keep blocked by unassessed paired scores")
+                _require(all(value["delta"] >= 0 for value in paired_stats.values()),
+                         f"attempt {expected_id} keep blocked by a paired score regression")
+                improved = [key for key in dimensions if score_changes[key]["gain_status"] == "met"]
+                gained = len(improved) >= keep_rule_contract["min_improved"]
+                _require(gained, f"attempt {expected_id} keep lacks meaningful gains outside the noise band")
+            else:
+                _require(gained, f"attempt {expected_id} keep did not meet every declared target gain")
             _require(attempt.get("retained_source_ref") == attempt["after"]["source_ref"],
                      f"attempt {expected_id} keep must retain its measured after source")
             previous_source_ref = attempt["after"]["source_ref"]
@@ -1111,7 +1284,21 @@ def verify(path):
              "attempt count exceeds or lacks its positive declared limit")
     _require(type(contract.get("no_gain_limit")) is int and contract["no_gain_limit"] > 0,
              "no_gain_limit must be a positive declared integer")
-    if stop["reason"] == "blocked":
+    if stop["reason"] == "scope_challenge":
+        _require(format_version == 2 and isinstance(stop.get("missing_scope"), list)
+                 and bool(stop["missing_scope"])
+                 and all(isinstance(value, str) and value.strip() for value in stop["missing_scope"]),
+                 "scope_challenge needs format-2 missing_scope view ids")
+        feedback = _artifact(path.parent, artifacts, stop.get("sponsor_feedback_ref"))
+        _require(isinstance(feedback, dict) and INTAKE.text(feedback.get("quote"))
+                 and INTAKE.text(feedback.get("actor")) and INTAKE.date(feedback.get("date"))
+                 and feedback.get("missing_scope") == stop["missing_scope"],
+                 "scope_challenge needs hash-bound sponsor feedback matching missing_scope")
+        intake_views = (brief.get("intake") or {}).get("views", [])
+        _require(all(value in {view["id"] for view in intake_views}
+                     for value in stop["missing_scope"]),
+                 "scope_challenge must name inventory views; revise intake to record new scope first")
+    elif stop["reason"] == "blocked":
         _require(not iterations or iterations[-1]["decision"] == "blocked",
                  "blocked stop needs a blocked final attempt or explicit baseline blocker")
     elif stop["reason"] == "iteration_cap":
@@ -1158,7 +1345,8 @@ def verify(path):
                  or current_scores["points"][point["id"]]["assessment_state"] == "fresh")
             for point in points
         )
-        _require(achieved >= math.ceil(len(points) * goal["fraction"])
+        _require(achieved >= math.ceil(
+                     (selected_count if format_version == 2 else len(points)) * goal["fraction"])
                  and current_checks["status"] == "pass" and current_checks["full_coverage"],
                  "target_provisionally_met needs current complete scores and passing full checks")
     if iterations and iterations[-1]["decision"] == "blocked":
@@ -1287,6 +1475,10 @@ def report(verified):
     points = contract["points"]
     denominator = len(points)
     goal = contract["goal"]
+    brief = verified.get("brief")
+    scope_report = (
+        INTAKE.validate(brief, root=Path(verified["path"]).parent)
+        if isinstance(brief, dict) and "intake" in brief else None)
     selected_points = [point for point in points if point["selected"]]
     target_count = math.ceil(
         (len(selected_points) if verified["format_version"] == 2 else denominator)
@@ -1442,8 +1634,16 @@ def report(verified):
         })
     return {
         "scope_id": contract["scope_id"],
+        "scope_header": scope_report["scope_header"] if scope_report else "Scope: undeclared (legacy)",
+        "scope_coverage": scope_report["coverage"] if scope_report else None,
+        "scope_claim": (
+            "partial-scope" if scope_report and scope_report["coverage"]["total"] > 0 and (
+                scope_report["coverage"]["assessment"] == "not_assessed"
+                or scope_report["coverage"]["covered"] < scope_report["coverage"]["total"])
+            else "legacy_unspecified" if scope_report is None else "declared-scope"),
         "build_id": verified["current_build_id"],
         "goal": {
+            "scope_denominator": scope_report["coverage"]["total"] if scope_report else None,
             "score": goal["score"],
             "fraction": goal["fraction"],
             "claim_scope": (
@@ -1633,7 +1833,7 @@ def _render_score_table(attempt):
     rows = []
     for point_id, change in attempt["score_changes"].items():
         delta = change["delta"]
-        delta_text = "Not comparable" if delta is None else f"{delta:+d}"
+        delta_text = "Not comparable" if delta is None else f"{delta:+g}"
         selected = "Selected" if change["selected"] else "Excluded"
         evidence = []
         if change["before_evidence"]:
@@ -1737,6 +1937,18 @@ def _render_attempt(verified, attempt):
         f'{attempt["effort_minutes"]} minutes'
         if attempt.get("effort_minutes") is not None else "Not recorded"
     )
+    panel = attempt.get("paired_panel")
+    panel_html = ""
+    if panel:
+        drift = "; ".join(
+            f'{key}: {value["baseline_drift"] if value["baseline_drift"] is not None else "not assessed"}'
+            for key, value in panel["points"].items())
+        panel_html = (
+            f'<p><strong>Paired panel:</strong> {_html_text(panel["panel_id"])}. '
+            f'Scores below are paired means; noise band {_html_text(panel["rule"]["noise_band"])}. '
+            f'<strong>Baseline drift:</strong> {_html_text(drift)}. '
+            f'<strong>Unmet targets:</strong> {_html_text(", ".join(attempt["unmet_targets"]) or "none")}.</p>'
+        )
     return (
         f'<article class="attempt-card" id="attempt-{attempt_id}">'
         '<header class="attempt-header"><div><p class="eyebrow">'
@@ -1754,7 +1966,7 @@ def _render_attempt(verified, attempt):
         f'{_html_text(attempt.get("after_source_ref") or "Not specified")}</span></div>'
         '<section class="section"><p class="eyebrow">Scorecard</p>'
         '<h3>What changed in the scores</h3>'
-        f'{_render_score_table(attempt)}</section>'
+        f'{panel_html}{_render_score_table(attempt)}</section>'
         f'{evidence_html}'
         '<section class="section"><p class="eyebrow">Change record</p>'
         '<h3>What was expected and observed</h3>'
@@ -1825,6 +2037,7 @@ def html_report(verified, attempt_id=None):
         "compliance percentages.</li>"
     )
     summary = (
+        f'<p class="report-stop">{_html_text(data["scope_header"])}</p>'
         f'<p class="report-meta">Scope <strong>{_html_text(data["scope_id"])}</strong>'
         f'<span>Build {_html_text(data["build_id"])}</span>'
         f'<span>{data["attempts"]} attempt(s)</span></p>'
