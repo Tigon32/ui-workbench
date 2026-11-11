@@ -117,7 +117,7 @@ only `covered`, while a labelled shell stub establishes reachability alone.
 Refinement without current coverage evidence is `partial-scope` when it has
 in-scope views, even if its local quality goal is met. Legacy runs disclose
 undeclared scope and do not silently acquire product claims.
-New preparation records `scope_contract_version: 1` and requires both files;
+New preparation records `scope_contract: scoped_v1` and requires both files;
 only explicit `--legacy-unscoped` can create unscoped compatibility artifacts.
 New refinement contracts also use this marker. Format-2 goal-stop verification
 now uses its already documented selected-point denominator, matching the report;
@@ -217,6 +217,15 @@ These are engineering consistency checks, not signatures or a hostile-browser
 sandbox. Source authenticity, completeness of declared history, honest
 severity/topic labels, reviewer independence, native/assistive behavior and
 participant outcomes remain outside the audit's proof.
+
+The Tier 1/2 boundary is unchanged: project markup/ARIA/declared-contrast tools
+own static Tier 1. Their
+[typed record schema](../.github/skills/ui-prototype-council/static-check.schema.json)
+requires source identity, actual tool provenance and consistent findings/status.
+Every check run by `render_check.py` belongs to Tier 2, including optional
+quality checks. A rendered report cannot establish a static pass. Typed
+rendered evidence also binds the declared rubric digest. Missing or
+wrong-tier evidence blocks adoption instead of manufacturing a default pass.
 
 ## Score semantics
 

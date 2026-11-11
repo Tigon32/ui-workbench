@@ -113,6 +113,22 @@ Projects must separately qualify native input, accessibility and presentation.
 A prototype that fails Tier 1 or 2 is discarded before any reviewer sees it. A rubric
 that scores a decidable dimension mixes reviewer noise into a question that had an answer.
 
+For new scoped rounds, Tier 1 must cite a hash-bound project static-check record
+matching [static-check.schema.json](static-check.schema.json), with the actual
+tool name and version, command or config. The workbench does not run or invent
+the project's static checks. Missing tools/evidence block adoption.
+Tier 2 comes only from `render_check.py --report RUN/checks.json`; it contains
+all rendered findings, not a fictional Tier 1 pass. Bind these records in the
+item's evidence manifest as `tier1_report` and `tier2_report` evidence types,
+then cite them in `adoption_checks`. Both must match the item's index and
+whole-source-folder digests; rendered evidence must match the round's rubric
+digest when declared. A screenshot is not a check report.
+Keep reports, runs and captures outside prototype source folders so generated
+outputs cannot change their own source identity. The
+[synthetic static record](../../../docs/examples/concept-exploration/static-check-report.example.json)
+is deliberately incomplete and uses zero placeholder hashes; it cannot establish
+a passing check.
+
 Unknown coverage is not a pass. Declare unsupported or unassessed evidence
 explicitly. Do not infer native behavior from browser captures.
 Review only changed dimensions and their affected neighbors for small increments.
@@ -161,6 +177,12 @@ Per round:
    in `NAME=FOLDER`, with `view_coverage` and `keep_dispositions` from the
    validated handoff. Both files are hash-bound, and the report recomputes scope
    coverage separately from craft. Old runs say `Scope: undeclared (legacy)`.
+   New rounds also bind DESIGN.md and a whole-folder source digest, and store
+   each reviewer's assigned order. Reviewer sheets must use that exact order.
+   Captures wait for fonts and layout; pages with asynchronous rendering can
+   declare `data-ready="false"` on the root and set it to `"true"` when ready.
+   Readiness timeouts, denied resource requests and truncated full-page
+   captures are not complete evidence.
 4. **Score independently.** Each reviewer gets a different seeded order and scores all
    items in one call, with the reviewer prompt below. No reviewer sees another's sheet.
    Save each sheet as `round-N/reviewer-<id>.json`.

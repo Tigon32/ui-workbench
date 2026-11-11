@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tigon32:ui-workbench:project-static-check:v1",
+  "title": "Project-owned static Tier 1 check record",
+  "type": "object",
+  "required": ["schema_version", "kind", "source_sha256", "source_tree_sha256", "tool", "tier1"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "project_static_check"},
+    "source_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source_tree_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "tool": {
+      "type": "object",
+      "required": ["name"],
+      "anyOf": [{"required": ["version"]}, {"required": ["command"]}, {"required": ["config"]}],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "command": {"type": "string", "minLength": 1},
+        "config": {"type": "string", "minLength": 1}
+      }
+    },
+    "tier1": {
+      "type": "object",
+      "required": ["status", "findings"],
+      "properties": {
+        "status": {"enum": ["pass", "fail", "incomplete"]},
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["severity", "message"],
+            "properties": {
+              "severity": {"enum": ["blocker", "review"]},
+              "message": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      },
+      "allOf": [{
+        "if": {"properties": {"status": {"const": "fail"}}},
+        "then": {"properties": {"findings": {"contains": {"properties": {"severity": {"const": "blocker"}}, "required": ["severity"]}}}},
+        "else": {"properties": {"findings": {"not": {"contains": {"properties": {"severity": {"const": "blocker"}}, "required": ["severity"]}}}}}
+      }]
+    }
+  }
+}

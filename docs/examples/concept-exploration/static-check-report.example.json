@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "project_static_check",
+  "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "source_tree_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "tool": {
+    "name": "synthetic-example-not-run",
+    "version": "illustration-only",
+    "command": "example-project-static-checker index.html"
+  },
+  "tier1": {
+    "status": "incomplete",
+    "findings": [{
+      "severity": "review",
+      "message": "Illustrative record only. No project markup, ARIA or declared-contrast checker ran."
+    }]
+  }
+}
