@@ -1,0 +1,11 @@
+:root {
+  color-scheme: light dark;
+  --ink: #20232a;
+  --surface: #ffffff;
+  --accent: #0645ad;
+  --line: #727985;
+  --focus: #0645ad;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --ink: #f0f2f5; --surface: #17191e; --accent: #9abaff; --line: #a6acb6; --focus: #9abaff; }
+}

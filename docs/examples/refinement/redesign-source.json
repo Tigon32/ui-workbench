@@ -4,7 +4,7 @@
   "files": {
     "page": {
       "path": "alternatives/redesign/index.html",
-      "sha256": "8b27ab255e19b03c22782cdadacf37a8b8c1623a5c6766b9abcc521c59c856c2"
+      "sha256": "61405e1f55bea69192db489e7920ee91ced5a5111c7cce381ad8cdb8831524f3"
     },
     "rubric": {
       "path": "rubric.json",
@@ -17,6 +17,10 @@
     "task-fixture": {
       "path": "tasks.json",
       "sha256": "26bdab10b9b8196cf1862661c45f0dffe782198601b4d14a0887feaa33e5a9c7"
+    },
+    "tokens": {
+      "path": "alternatives/redesign/tokens.css",
+      "sha256": "769e0543b813e25215ccbc221b1cd80d0aef74eeb4f312da92577ac2dc988b34"
     }
   }
 }

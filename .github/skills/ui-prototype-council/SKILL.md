@@ -113,7 +113,8 @@ Projects must separately qualify native input, accessibility and presentation.
 A prototype that fails Tier 1 or 2 is discarded before any reviewer sees it. A rubric
 that scores a decidable dimension mixes reviewer noise into a question that had an answer.
 
-For new scoped rounds, Tier 1 must cite a hash-bound project static-check record
+For every newly prepared round (including explicit legacy-unscoped runs),
+Tier 1 must cite a hash-bound project static-check record
 matching [static-check.schema.json](static-check.schema.json), with the actual
 tool name and version, command or config. The workbench does not run or invent
 the project's static checks. Missing tools/evidence block adoption.
@@ -128,6 +129,9 @@ outputs cannot change their own source identity. The
 [synthetic static record](../../../docs/examples/concept-exploration/static-check-report.example.json)
 is deliberately incomplete and uses zero placeholder hashes; it cannot establish
 a passing check.
+Unmarked historical rounds retain their original outcome and disclose
+"tier checks self-declared (legacy binding)"; the legacy flag is not an
+evidence bypass for newly prepared rounds.
 
 Unknown coverage is not a pass. Declare unsupported or unassessed evidence
 explicitly. Do not infer native behavior from browser captures.
@@ -414,10 +418,10 @@ together.
 
 | Script | SHA-256 |
 |---|---|
-| `council.py` | `ebbc66c47d8a286bf6f683e2fb638454590e93ee1e8af4a5ff4f815b29f42aab` |
-| `render_check.py` | `58870fd0eb510d87fd75f94aba0eaafa6f0ce658b3e729c077a9e57f981258d7` |
+| `council.py` | `12ab027958cc72aab9afe1d4aed90b9757cdc46a53748054f0b68a5e3affd115` |
+| `render_check.py` | `2f3ef3c23be66140b0defbf09d436cce3bd7259bdee2803882a6d4b2aa1a7cbb` |
 | `design_tokens.py` | `17fe482b02db00e0298401c0e4012fec9ca205ef0f6594a122bf22448b7fdf17` |
-| `round_prep.py` | `7d27f710b5ffb1585a166b58bebb407ee7cff05c90da3c61c93f108feb14931f` |
+| `round_prep.py` | `3e1b6fdbf30b2b6ac437bb7cfd2c4e81019f2858299f2eb0a41ff525ec5886fa` |
 | `profiles.py` | `5aa738737f451df62aced9e3b99a4648b793169cfe3ad094d3719cffd7cc5df5` |
 | `iterations.py` | `320aa6b7b9261f5930a357b2e0a56b66705d2ab1b94c1d317febc2150cb33279` |
 | `intake.py` | `46b62b63a57ca30ecdbf35348eceee376d6760e9e6a60a9ffbc3a7021e4a344d` |
@@ -433,6 +437,8 @@ The default catalogue is also pinned:
 - `render_check.py` uses the installed Chrome, which is not version-pinned. It skips
   contrast over background images and under forced colors, where the user agent owns
   colour.
+- Its folder/request guard and offline WebSocket proxy are not an OS sandbox.
+  WebRTC, WebTransport and hostile prototype code are not qualified.
 - `round_prep.py` requires an empty blind directory and refuses existing round
   metadata. Use new output directories and round numbers. Keep run records and captures
   out of version control unless the target project approves them.

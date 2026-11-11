@@ -119,7 +119,7 @@ in-scope views, even if its local quality goal is met. Legacy runs disclose
 undeclared scope and do not silently acquire product claims.
 New preparation records `scope_contract: scoped_v1` and requires both files;
 only explicit `--legacy-unscoped` can create unscoped compatibility artifacts.
-New refinement contracts also use this marker. Format-2 goal-stop verification
+New refinement contracts use `scope_contract_version: 1`. Format-2 goal-stop verification
 now uses its already documented selected-point denominator, matching the report;
 the judge rejected retaining the inconsistent full-inventory calculation.
 
@@ -217,6 +217,9 @@ These are engineering consistency checks, not signatures or a hostile-browser
 sandbox. Source authenticity, completeness of declared history, honest
 severity/topic labels, reviewer independence, native/assistive behavior and
 participant outcomes remain outside the audit's proof.
+The installed Chrome guard intercepts file/HTTP requests and blocks raw WebSockets
+with a no-bypass offline proxy plus explicit attempt reporting. It is not an OS
+network sandbox; WebRTC, WebTransport and hostile-code isolation are not qualified.
 
 The Tier 1/2 boundary is unchanged: project markup/ARIA/declared-contrast tools
 own static Tier 1. Their
@@ -226,6 +229,20 @@ Every check run by `render_check.py` belongs to Tier 2, including optional
 quality checks. A rendered report cannot establish a static pass. Typed
 rendered evidence also binds the declared rubric digest. Missing or
 wrong-tier evidence blocks adoption instead of manufacturing a default pass.
+This typed-evidence rule also applies to newly prepared legacy-unscoped rounds.
+Only historical rounds with no scope-contract marker keep their old outcome,
+with a nonblocking disclosure that the tier checks were self-declared.
+Recorded capture truncations block scoring/adoption even if preparation left
+metadata behind before returning a failure.
+
+The judge closed all 14 accepted findings after the integration fixes. Final
+validation passed all 198 tests with `UI_CHECK_REQUIRED=1 python3 -m unittest
+discover -s tests`, with no skips; Python syntax and `git diff --check` also passed.
+The maintained format-1 example was re-tokenised
+without changing its score/decision semantics: 96 comparisons preserved element
+text, geometry and computed styles across the existing browser configurations
+and error state. Its dependent hashes were regenerated and its report was
+unchanged apart from identities. Historical dogfood evidence was not rewritten.
 
 ## Score semantics
 

@@ -40,6 +40,19 @@ CAPTURE_STATE_WIDTH = 1280
 SHEET = (("high-contrast-dark", False, 1280), ("light", True, 1280), ("light", False, 320))
 
 
+def hash_source_tree(folder):
+    """Folder-wide source identity: sha256 over every local file's relative path and
+    bytes under `folder` (DESIGN.md and all other source assets), sorted for a stable
+    result. This deliberately reuses render_check.py's own `_folder_digest` algorithm
+    verbatim (rather than reimplementing the same idea slightly differently) so a
+    round's source_tree_sha256 and a render_check --report's source_tree_sha256 for
+    the same folder are byte-identical and directly comparable. render_check.py owns
+    that helper; round_prep.py only calls it (now the public `RENDER.folder_digest`).
+    Generated captures/outputs written outside `folder` are naturally excluded.
+    """
+    return RENDER.folder_digest(folder)
+
+
 def blind_ids(rng, count):
     ids = set()
     while len(ids) < count:
@@ -74,8 +87,23 @@ def ensure_round_is_new(run, round_number):
         )
 
 
+def capture_full_page(browser, path, truncations, ident):
+    """Full-page screenshot() now reports {"truncated": bool, "height": int} instead
+    of silently clamping at 6000px; a truncated capture is an evidence integrity
+    finding (part of the image is missing), not a cosmetic detail, so every full-page
+    call site routes through here to record it for a hard failure at the end of
+    `prepare`, rather than letting the return value be silently discarded."""
+    result = browser.screenshot(path, full_page=True) or {}
+    if result.get("truncated"):
+        truncations.append({"item": ident, "path": path.name, "height": result.get("height")})
+
+
 def contact_sheet(browser, images, target):
-    """Lay three captures side by side at reduced scale and capture that page."""
+    """Lay three captures side by side at reduced scale and capture that page. The
+    page and its <img> sources commonly live in different trusted folders (the
+    round's own output folder, plus each item's temp capture folder), so every
+    folder involved is added to the guard's allow-list rather than replacing it
+    with a single folder."""
     cells = "".join(
         f'<figure><img src="{path.resolve().as_uri()}" alt=""><figcaption>{label}</figcaption></figure>'
         for label, path in images)
@@ -85,10 +113,14 @@ def contact_sheet(browser, images, target):
         "padding:16px;background:#808080;font:16px system-ui;align-items:flex-start}"
         "figure{margin:0}img{display:block;height:675px}figcaption{color:#fff;padding-top:4px}"
         f"</style>{cells}", encoding="utf-8")
+    browser.add_allowed_folder(target.parent)
+    for _, path in images:
+        browser.add_allowed_folder(path.parent)
     browser.call("Emulation.setDeviceMetricsOverride", width=2200, height=720,
                  deviceScaleFactor=1, mobile=False)
     browser.call("Emulation.setEmulatedMedia", features=[])
     browser.call("Page.navigate", wait_event="Page.loadEventFired", url=page.as_uri())
+    browser.last_ready = RENDER.wait_ready(browser)
     browser.screenshot(target)
     page.unlink()
 
@@ -104,6 +136,12 @@ def prepare(args):
         raise SystemExit("round-prep: each item must be NAME=FOLDER") from error
     if len(items) != len(args.items):
         raise SystemExit("round-prep: item names must be unique")
+    if args.legacy_unscoped and (args.brief or args.directions):
+        raise SystemExit(
+            "round-prep: --legacy-unscoped cannot be combined with --brief/--directions")
+    if not args.legacy_unscoped and not args.brief:
+        raise SystemExit(
+            "round-prep: pass --brief and --directions, or explicitly set --legacy-unscoped")
     scoped_files = {}
     if args.brief:
         if not args.directions:
@@ -137,7 +175,8 @@ def prepare(args):
         page, design = folder / "index.html", folder / "DESIGN.md"
         if not page.is_file() or not design.is_file():
             raise SystemExit(f"round-prep: {folder} must contain index.html and DESIGN.md")
-        sources[name] = (page, design, hashlib.sha256(page.read_bytes()).hexdigest())
+        sources[name] = (page, design, hashlib.sha256(page.read_bytes()).hexdigest(),
+                         hash_source_tree(folder))
     if not Path(args.chrome).is_file():
         raise SystemExit(f"round-prep: Chrome not found at {args.chrome}")
     ensure_round_is_new(args.run, args.round)
@@ -146,14 +185,15 @@ def prepare(args):
     ids = blind_ids(rng, len(items))
     mapping = dict(zip(ids, items))
     browser = RENDER.Browser(args.chrome)
+    truncations = []
     try:
         with tempfile.TemporaryDirectory() as temp:
             for ident, name in mapping.items():
-                page, design, _ = sources[name]
+                page, design, _, _ = sources[name]
                 out = create_item_directory(args.blind, ident)
                 for theme, forced, width in VIEWS:
                     browser.load(page.resolve().as_uri(), width, theme, forced)
-                    browser.screenshot(out / f"{theme}-{width}.png", full_page=True)
+                    capture_full_page(browser, out / f"{theme}-{width}.png", truncations, ident)
                 if profiles:
                     by_width = {}
                     for profile, width in profiles["profiles"].items():
@@ -162,15 +202,18 @@ def prepare(args):
                         label = "-".join(names)
                         for theme in ("light", "dark"):
                             browser.load(page.resolve().as_uri(), width, theme, False)
-                            browser.screenshot(
-                                out / f"profile-{label}-{theme}-{width}.png", full_page=True)
+                            capture_full_page(
+                                browser, out / f"profile-{label}-{theme}-{width}.png",
+                                truncations, ident)
                     if RENDER.CHECK_WIDTH not in by_width:
                         browser.load(page.resolve().as_uri(), RENDER.CHECK_WIDTH, "light", True)
-                        browser.screenshot(
-                            out / f"high-contrast-forced-{RENDER.CHECK_WIDTH}.png", full_page=True)
+                        capture_full_page(
+                            browser, out / f"high-contrast-forced-{RENDER.CHECK_WIDTH}.png",
+                            truncations, ident)
                     browser.load(page.resolve().as_uri(), profiles["reflow_width"], "light", False)
-                    browser.screenshot(
-                        out / f"reflow-zoom-{profiles['reflow_width']}.png", full_page=True)
+                    capture_full_page(
+                        browser, out / f"reflow-zoom-{profiles['reflow_width']}.png",
+                        truncations, ident)
                 shots = []
                 for theme, forced, width in SHEET:
                     browser.load(page.resolve().as_uri(), width, theme, forced)
@@ -188,15 +231,16 @@ def prepare(args):
                                          url="about:blank")
                             browser.load(page.resolve().as_uri() + fragment, width, "light", False)
                             profile_label = "-".join(names)
-                            browser.screenshot(
-                                out / f"state-{label}-{profile_label}-{width}.png", full_page=True)
+                            capture_full_page(
+                                browser, out / f"state-{label}-{profile_label}-{width}.png",
+                                truncations, ident)
                 else:
                     for label, fragment in args.state:
                         # A fragment-only change is a same-document navigation with no load
                         # event, so leave the page first and every state loads fresh.
                         browser.call("Page.navigate", wait_event="Page.loadEventFired", url="about:blank")
                         browser.load(page.resolve().as_uri() + fragment, CAPTURE_STATE_WIDTH, "light", False)
-                        browser.screenshot(out / f"state-{label}.png", full_page=True)
+                        capture_full_page(browser, out / f"state-{label}.png", truncations, ident)
                 shutil.copyfile(design, out / "DESIGN.md")
                 references = {
                     f"{ident}/{capture.name}": {
@@ -224,6 +268,9 @@ def prepare(args):
         meta["source_sha256"] = {
             ident: sources[name][2] for ident, name in mapping.items()
         }
+        meta["source_tree_sha256"] = {
+            ident: sources[name][3] for ident, name in mapping.items()
+        }
         meta["evidence_manifest"] = {
             f"{path.parent.name}/{path.name}": {
                 "path": str(path.resolve()),
@@ -231,6 +278,16 @@ def prepare(args):
             }
             for path in sorted(args.blind.glob("*/*.png"))
         }
+    # DESIGN.md is bound into the evidence manifest for every item so adoption
+    # review can always resolve each item's design rationale, independent of
+    # whether a rubric ran.
+    meta.setdefault("evidence_manifest", {}).update({
+        f"{ident}/DESIGN.md": {
+            "path": str(sources[name][1].resolve()),
+            "sha256": hashlib.sha256(sources[name][1].read_bytes()).hexdigest(),
+        }
+        for ident, name in mapping.items()
+    })
     if scoped_files:
         meta.setdefault("evidence_manifest", {}).update({
             reference: {"path": str(path.resolve()),
@@ -238,17 +295,32 @@ def prepare(args):
             for reference, path in scoped_files.items()
         })
         meta["scope_refs"] = {"brief": "project/brief", "directions": "project/directions"}
-    (round_dir / "round.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
-    (args.blind / "sealed.json").write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
+        meta["scope_contract"] = "scoped_v1"
+    else:
+        meta["scope_contract"] = "legacy_unscoped"
     # Rotations of one seeded shuffle: every reviewer sees a different order, and each
     # item moves through the positions, which spreads position bias across reviewers.
     base = list(ids)
     random.Random(args.seed + 1).shuffle(base)
+    reviewer_orders = {}
     for reviewer in range(args.reviewers):
         shift = reviewer * len(base) // args.reviewers
-        order = base[shift:] + base[:shift]
-        print(json.dumps({"reviewer": f"r{reviewer + 1}", "seed": args.seed, "order": order}))
+        reviewer_orders[f"r{reviewer + 1}"] = base[shift:] + base[:shift]
+    meta["reviewer_orders"] = reviewer_orders
+    if truncations:
+        # A truncated full-page capture is missing evidence (clamped at 6000px), not
+        # a cosmetic detail, so it is recorded prominently in round metadata for
+        # forensics *and* treated as a hard failure, mirroring the guard's own
+        # "nonzero on violation, not a silent/soft finding" rule.
+        meta["capture_truncations"] = truncations
+    (round_dir / "round.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    (args.blind / "sealed.json").write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
+    for reviewer, order in reviewer_orders.items():
+        print(json.dumps({"reviewer": reviewer, "seed": args.seed, "order": order}))
     print(f"round-prep: {version}; {len(ids)} items blinded into {args.blind}", file=sys.stderr)
+    if truncations:
+        names = ", ".join(f"{t['item']}/{t['path']} ({t['height']}px)" for t in truncations)
+        raise SystemExit(f"round-prep: full-page capture(s) truncated at the 6000px clamp: {names}")
 
 
 def reveal(args):
@@ -286,6 +358,9 @@ def main(argv=None):
     prep.add_argument("--brief", type=Path, help="canonical sponsor-confirmed scoped project brief")
     prep.add_argument("--directions", type=Path,
                       help="JSON list of non-calibration directions with view coverage and KEEP dispositions")
+    prep.add_argument("--legacy-unscoped", action="store_true",
+                      help="explicit compatibility path for a round with no brief/directions scope; "
+                           "records scope_contract=legacy_unscoped instead of scoped_v1")
     prep.add_argument("--state", action="append", default=[], type=parse_state,
                       metavar="LABEL=#FRAGMENT",
                       help="also capture the page opened at this URL fragment, in light at 1280 pixels")

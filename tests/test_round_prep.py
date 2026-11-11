@@ -127,7 +127,7 @@ class RoundPrepTest(unittest.TestCase):
                 "prepare", "--run", str(run), "--round", "1",
                 "--blind", str(blind), "--seed", "1", "--model", "test",
                 "--keep", "1", "--strong", "item", "--weak", "item",
-                "--chrome", CHROME, "--rubric", str(rubric),
+                "--chrome", CHROME, "--rubric", str(rubric), "--legacy-unscoped",
                 "--state", "ready=#ready", f"item={item}",
             ])
 
@@ -160,6 +160,108 @@ class RoundPrepTest(unittest.TestCase):
                                 for ref in metadata["evidence_manifest"]))
             self.assertTrue(any("state-ready-mobile-390.png" in ref
                                 for ref in metadata["evidence_manifest"]))
+            self.assertEqual(metadata["scope_contract"], "legacy_unscoped")
+            ident = metadata["items"][0]
+            self.assertEqual(metadata["source_tree_sha256"][ident],
+                             ROUND_PREP.hash_source_tree(item))
+            design_record = metadata["evidence_manifest"][f"{ident}/DESIGN.md"]
+            self.assertEqual(design_record["sha256"],
+                             hashlib.sha256((item / "DESIGN.md").read_bytes()).hexdigest())
+            self.assertEqual(set(metadata["reviewer_orders"]), {"r1", "r2", "r3"})
+            for order in metadata["reviewer_orders"].values():
+                self.assertEqual(sorted(order), sorted(metadata["items"]))
+
+    def test_prepare_requires_brief_or_legacy_unscoped(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            item = root / "item"
+            item.mkdir()
+            (item / "index.html").write_text("<html><body>Hi</body></html>", encoding="utf-8")
+            (item / "DESIGN.md").write_text("Local design.", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "explicitly set --legacy-unscoped"):
+                ROUND_PREP.main([
+                    "prepare", "--run", str(root / "run"), "--round", "1",
+                    "--blind", str(root / "blind"), "--seed", "1", "--model", "test",
+                    "--keep", "1", "--strong", "item", "--weak", "item",
+                    f"item={item}",
+                ])
+            self.assertFalse((root / "run").exists())
+
+    def test_prepare_rejects_legacy_unscoped_combined_with_brief(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            item = root / "item"
+            item.mkdir()
+            (item / "index.html").write_text("<html><body>Hi</body></html>", encoding="utf-8")
+            (item / "DESIGN.md").write_text("Local design.", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "cannot be combined"):
+                ROUND_PREP.main([
+                    "prepare", "--run", str(root / "run"), "--round", "1",
+                    "--blind", str(root / "blind"), "--seed", "1", "--model", "test",
+                    "--keep", "1", "--strong", "item", "--weak", "item",
+                    "--legacy-unscoped", "--brief", "project.json", f"item={item}",
+                ])
+
+    def test_hash_source_tree_changes_with_any_local_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            (folder / "index.html").write_text("<html></html>", encoding="utf-8")
+            (folder / "DESIGN.md").write_text("Design.", encoding="utf-8")
+            before = ROUND_PREP.hash_source_tree(folder)
+            (folder / "tokens.css").write_text(":root{}", encoding="utf-8")
+            after = ROUND_PREP.hash_source_tree(folder)
+            self.assertNotEqual(before, after)
+            self.assertEqual(after, ROUND_PREP.RENDER.folder_digest(folder))
+
+    def test_capture_full_page_records_a_truncated_screenshot_as_a_finding(self):
+        class StubBrowser:
+            def screenshot(self, path, full_page=False):
+                return {"truncated": True, "height": 6000}
+        truncations = []
+        ROUND_PREP.capture_full_page(StubBrowser(), Path("tall.png"), truncations, "ABC")
+        self.assertEqual(truncations, [{"item": "ABC", "path": "tall.png", "height": 6000}])
+
+    def test_capture_full_page_ignores_an_untruncated_screenshot(self):
+        class StubBrowser:
+            def screenshot(self, path, full_page=False):
+                return {"truncated": False, "height": 900}
+        truncations = []
+        ROUND_PREP.capture_full_page(StubBrowser(), Path("short.png"), truncations, "ABC")
+        self.assertEqual(truncations, [])
+
+    @unittest.skipUnless(Path(CHROME).exists(), "installed Chrome is required")
+    def test_scoped_prepare_records_scope_contract_and_scope_refs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            example = ROOT / "docs/examples/concept-exploration"
+            brief = json.loads((example / "project-intake-v2.json").read_text())
+            direction = json.loads((example / "exploration.json").read_text())["directions"][0]
+            html = ('<!doctype html><html lang="en"><title>One</title><body>'
+                    '<main><h1>Review</h1></main></body></html>')
+            item, calib = root / "item", root / "calib"
+            for folder in (item, calib):
+                folder.mkdir()
+                (folder / "index.html").write_text(html, encoding="utf-8")
+                (folder / "DESIGN.md").write_text("Local design.", encoding="utf-8")
+            brief_path = root / "project.json"
+            brief_path.write_text(json.dumps(brief), encoding="utf-8")
+            directions_path = root / "directions.json"
+            directions_path.write_text(json.dumps([{**direction, "id": "item"}]), encoding="utf-8")
+            run, blind = root / "run", root / "blind"
+            result = ROUND_PREP.main([
+                "prepare", "--run", str(run), "--round", "1",
+                "--blind", str(blind), "--seed", "1", "--model", "test",
+                "--keep", "1", "--strong", "calib", "--weak", "calib",
+                "--chrome", CHROME, "--brief", str(brief_path), "--directions", str(directions_path),
+                f"item={item}", f"calib={calib}",
+            ])
+            self.assertEqual(result, 0)
+            metadata = json.loads((run / "round-1" / "round.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["scope_contract"], "scoped_v1")
+            self.assertEqual(metadata["scope_refs"],
+                             {"brief": "project/brief", "directions": "project/directions"})
+            for ident in metadata["items"]:
+                self.assertIn(f"{ident}/DESIGN.md", metadata["evidence_manifest"])
 
 
 if __name__ == "__main__":

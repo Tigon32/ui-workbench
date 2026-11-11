@@ -203,6 +203,107 @@ class CouncilTest(unittest.TestCase):
         with self.assertRaises(COUNCIL.RunError):
             COUNCIL.run(run, write=False)
 
+    def _scoped_round(self, run, items=("A", "B", "C"), contract="scoped_v1",
+                       with_scope_refs=True, with_design=True):
+        """Shared setup mirroring test_scope_report_is_bound_to_intake_and_
+        separate_from_craft, additionally marking the round scope_contract=
+        scoped_v1 (or another value under test) and binding DESIGN.md evidence
+        for every item, as required of any marked round."""
+        example = ROOT / "docs/examples/concept-exploration"
+        brief = json.loads((example / "project-intake-v2.json").read_text())
+        direction = json.loads((example / "exploration.json").read_text())["directions"][0]
+        directions = [{**direction, "id": f"p-{name}"} for name in items]
+        meta_path = run / "round-1/round.json"
+        meta = json.loads(meta_path.read_text())
+        manifest = {}
+        if with_scope_refs:
+            for key, data in (("brief", brief), ("directions", directions)):
+                path = run / f"{key}.json"
+                path.write_text(json.dumps(data))
+                manifest[f"project/{key}"] = {
+                    "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            meta["scope_refs"] = {"brief": "project/brief", "directions": "project/directions"}
+        if with_design:
+            design = run / "DESIGN.md"
+            design.write_text("# Design\n\nSynthetic design rationale for tests.\n")
+            digest = hashlib.sha256(design.read_bytes()).hexdigest()
+            for item in meta["items"]:
+                manifest[f"{item}/DESIGN.md"] = {"path": str(design), "sha256": digest}
+        meta["evidence_manifest"] = manifest
+        if contract is not None:
+            meta["scope_contract"] = contract
+        meta_path.write_text(json.dumps(meta))
+
+    def test_scope_contract_rejects_unsupported_value(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        run = self.make([self.round_of([scores, scores])])
+        self._scoped_round(run, contract="scoped_v2")
+        with self.assertRaisesRegex(COUNCIL.RunError, "unsupported scope_contract"):
+            COUNCIL.run(run, write=True)
+
+    def test_scoped_v1_without_scope_refs_fails_instead_of_becoming_legacy(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        run = self.make([self.round_of([scores, scores])])
+        self._scoped_round(run, with_scope_refs=False)
+        with self.assertRaisesRegex(COUNCIL.RunError, "scoped_v1 requires scope_refs"):
+            COUNCIL.run(run, write=True)
+
+    def test_legacy_unscoped_marker_rejects_scope_refs(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        run = self.make([self.round_of([scores, scores])])
+        self._scoped_round(run, contract="legacy_unscoped")
+        with self.assertRaisesRegex(COUNCIL.RunError, "legacy_unscoped must not declare scope_refs"):
+            COUNCIL.run(run, write=True)
+
+    def test_scoped_v1_requires_design_md_for_every_item(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        run = self.make([self.round_of([scores, scores])])
+        self._scoped_round(run, with_design=False)
+        with self.assertRaisesRegex(COUNCIL.RunError, "DESIGN.md evidence is required"):
+            COUNCIL.run(run, write=True)
+
+    def test_scoped_v1_marked_round_wins_with_scope_refs_and_design_md(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        run = self.make([self.round_of([scores, scores])])
+        self._scoped_round(run)
+        self.assertEqual(self.verdict(run), ("WINNER", ["p-A"]))
+
+    def test_declared_legacy_unscoped_round_reports_a_compatibility_marker_line(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        run = self.make([self.round_of([scores, scores])])
+        self._scoped_round(run, contract="legacy_unscoped", with_scope_refs=False)
+        self.verdict(run)
+        rendered = (run / "round-1/report.md").read_text()
+        self.assertIn("Scope: legacy_unscoped (declared compatibility path).", rendered)
+
+    def test_historically_unmarked_round_keeps_undeclared_legacy_wording(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        run = self.make([self.round_of([scores, scores])])
+        self.verdict(run)
+        rendered = (run / "round-1/report.md").read_text()
+        self.assertIn("Scope: undeclared (legacy)", rendered)
+
+    def test_reviewer_orders_enforces_the_assigned_order_per_reviewer(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        meta, sheets = self.round_of([scores, scores])
+        meta["reviewer_orders"] = {"r0": list(sheets[0]["order"]), "r1": list(sheets[1]["order"])}
+        run = self.make([(meta, sheets)])
+        self.assertEqual(self.verdict(run), ("WINNER", ["p-A"]))
+        meta_path = run / "round-1/round.json"
+        stored = json.loads(meta_path.read_text())
+        stored["reviewer_orders"]["r1"] = list(reversed(stored["reviewer_orders"]["r1"]))
+        meta_path.write_text(json.dumps(stored))
+        with self.assertRaisesRegex(COUNCIL.RunError, "did not review in its assigned order"):
+            COUNCIL.run(run, write=True)
+
+    def test_reviewer_orders_absent_preserves_the_old_distinctness_only_check(self):
+        scores = {"A": (9, 8), "B": (5, 6), "C": (4, 5), "W": (2, 2), "S": (9, 9)}
+        meta, sheets = self.round_of([scores, scores])
+        sheets[1]["order"] = list(sheets[0]["order"])
+        run = self.make([(meta, sheets)])
+        with self.assertRaisesRegex(COUNCIL.RunError, "reviewers must see different shuffled orders"):
+            COUNCIL.run(run, write=True)
+
 
 class SkillDigestTest(unittest.TestCase):
     def test_skill_pins_every_bundled_script(self):
@@ -289,6 +390,285 @@ class AdoptionTest(unittest.TestCase):
     def report(self, run):
         self.verdict(run)
         return (run / "round-1/report.md").read_text()
+
+    def _mark_scoped_v1(self, run):
+        """Bind the minimal scope_refs + DESIGN.md evidence a scoped_v1 marker
+        requires, on top of adoption_run()'s fixture, so typed-tier-evidence
+        gating (forced for any scoped_v1 round, with or without
+        adoption_evidence_version) can be exercised directly."""
+        folder = run / "round-1"
+        meta_path = folder / "round.json"
+        meta = json.loads(meta_path.read_text())
+        contestants = [i for i in meta["items"]
+                       if i not in (meta["calibration"]["weak"], meta["calibration"]["strong"])]
+        example = ROOT / "docs/examples/concept-exploration"
+        brief = json.loads((example / "project-intake-v2.json").read_text())
+        direction = json.loads((example / "exploration.json").read_text())["directions"][0]
+        directions = [{**direction, "id": meta["reveal"][name]} for name in contestants]
+        manifest = meta["evidence_manifest"]
+        for key, data in (("brief", brief), ("directions", directions)):
+            path = run / f"{key}.json"
+            path.write_text(json.dumps(data))
+            manifest[f"project/{key}"] = {
+                "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        design = run / "DESIGN.md"
+        design.write_text("# Design\n\nSynthetic design rationale for tests.\n")
+        design_digest = hashlib.sha256(design.read_bytes()).hexdigest()
+        for item in meta["items"]:
+            manifest[f"{item}/DESIGN.md"] = {"path": str(design), "sha256": design_digest}
+        meta["evidence_manifest"] = manifest
+        meta["scope_refs"] = {"brief": "project/brief", "directions": "project/directions"}
+        meta["scope_contract"] = "scoped_v1"
+        meta_path.write_text(json.dumps(meta))
+        return meta
+
+    def _render_check_report(self, run, item, tier2=("pass", []), source_sha256=None,
+                              source_tree_sha256=None, rubric_sha256=None, omit_rubric=False):
+        """Write a typed render_check --report document (tier2 only, per the
+        Issue 13 P4 final ruling: the renderer records only real tier2 render
+        checks) into the run folder and bind it into item's evidence_manifest
+        as f"{item}/render-report", returning the ref. Defaults the report's
+        rubric_sha256 to the round's declared one so callers that don't care
+        about rubric binding get a report that matches by default."""
+        folder = run / "round-1"
+        meta = json.loads((folder / "round.json").read_text())
+        page = {
+            "page": f"{item}/index.html",
+            "source_sha256": source_sha256 if source_sha256 is not None else meta["source_sha256"][item],
+            "tier2": {"status": tier2[0],
+                      "findings": None if tier2[1] is None else list(tier2[1])},
+        }
+        if source_tree_sha256 is not None:
+            page["source_tree_sha256"] = source_tree_sha256
+        report = {"schema_version": 1, "kind": "render_check", "pages": [page]}
+        if not omit_rubric:
+            report["rubric_sha256"] = rubric_sha256 if rubric_sha256 is not None else meta.get("rubric_sha256")
+        path = folder / f"{item}-render-check.json"
+        path.write_text(json.dumps(report))
+        ref = f"{item}/render-report"
+        meta["evidence_manifest"][ref] = {
+            "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        (folder / "round.json").write_text(json.dumps(meta))
+        return ref
+
+    def _static_check_report(self, run, item, tier1=("pass", []), source_sha256=None,
+                              source_tree_sha256=None, tool=("eslint-a11y", "1.2.3"),
+                              omit_tier1=False):
+        """Write a typed project_static_check tier1 report (flat, not nested
+        under "pages") into the run folder and bind it into item's
+        evidence_manifest as f"{item}/static-report", returning the ref."""
+        folder = run / "round-1"
+        meta = json.loads((folder / "round.json").read_text())
+        report = {
+            "schema_version": 1, "kind": "project_static_check",
+            "source_sha256": source_sha256 if source_sha256 is not None else meta["source_sha256"][item],
+            "tool": {"name": tool[0], "version": tool[1]} if tool is not None else {},
+        }
+        if source_tree_sha256 is not None:
+            report["source_tree_sha256"] = source_tree_sha256
+        if not omit_tier1:
+            report["tier1"] = {"status": tier1[0], "findings": list(tier1[1])}
+        path = folder / f"{item}-static-check.json"
+        path.write_text(json.dumps(report))
+        ref = f"{item}/static-report"
+        meta["evidence_manifest"][ref] = {
+            "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        (folder / "round.json").write_text(json.dumps(meta))
+        return ref
+
+    def _set_adoption_evidence(self, run, item, tier1_ref=None, tier2_ref=None):
+        folder = run / "round-1"
+        stored = json.loads((folder / "round.json").read_text())
+        if tier1_ref is not None:
+            stored["adoption_checks"][item]["tier1"] = {"status": "pass", "evidence": [tier1_ref]}
+        if tier2_ref is not None:
+            stored["adoption_checks"][item]["tier2"] = {"status": "pass", "evidence": [tier2_ref]}
+        (folder / "round.json").write_text(json.dumps(stored))
+
+    def test_scoped_v1_forces_typed_tier_evidence_even_without_adoption_evidence_version(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        # adoption_checks still reference the plain screenshot capture, and no
+        # adoption_evidence_version is set anywhere: the P4 bypass this closes.
+        report = self.report(run)
+        self.assertIn(
+            "tier1 evidence must be a typed project_static_check report, not a screenshot reference", report)
+        self.assertIn(
+            "tier2 evidence must be a typed render_check report, not a screenshot reference", report)
+        self.assertIn("NOT_ADOPTABLE", report)
+
+    def test_scoped_v1_accepts_matching_typed_tier1_and_tier2_reports_as_adoption_evidence(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        for item in json.loads((run / "round-1/round.json").read_text())["items"]:
+            tier1_ref = self._static_check_report(run, item)
+            tier2_ref = self._render_check_report(run, item)
+            self._set_adoption_evidence(run, item, tier1_ref=tier1_ref, tier2_ref=tier2_ref)
+        report = self.report(run)
+        self.assertIn("| A | 77.78 | ADOPTABLE |", report)
+
+    def test_static_tier1_rejects_a_render_check_report_as_wrong_kind(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._render_check_report(run, "A")
+        self._set_adoption_evidence(run, "A", tier1_ref=ref)
+        report = self.report(run)
+        self.assertIn(
+            "tier1 evidence must be a typed project_static_check report, not a screenshot reference "
+            "or wrong report kind", report)
+
+    def test_render_tier2_rejects_a_static_check_report_as_wrong_kind(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._static_check_report(run, "A")
+        self._set_adoption_evidence(run, "A", tier2_ref=ref)
+        report = self.report(run)
+        self.assertIn(
+            "tier2 evidence must be a typed render_check report, not a screenshot reference "
+            "or wrong report kind", report)
+
+    def test_static_tier1_rejects_missing_tier1_block(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._static_check_report(run, "A", omit_tier1=True)
+        self._set_adoption_evidence(run, "A", tier1_ref=ref)
+        report = self.report(run)
+        self.assertIn("tier1 evidence report has no valid tier1 status", report)
+
+    def test_static_tier1_requires_tool_provenance(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._static_check_report(run, "A", tool=None)
+        self._set_adoption_evidence(run, "A", tier1_ref=ref)
+        report = self.report(run)
+        self.assertIn(
+            "tier1 evidence report is missing tool provenance (name plus version, command, or config)", report)
+
+    def test_static_tier1_rejects_blocker_findings_even_when_status_claims_pass(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._static_check_report(
+            run, "A", tier1=("pass", [{"severity": "blocker", "message": "contrast too low"}]))
+        self._set_adoption_evidence(run, "A", tier1_ref=ref)
+        report = self.report(run)
+        self.assertIn("tier1 evidence report status contradicts its own blocker findings", report)
+
+    def test_static_tier1_allows_review_findings_alongside_a_genuine_pass(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        for item in json.loads((run / "round-1/round.json").read_text())["items"]:
+            tier1_ref = self._static_check_report(
+                run, item, tier1=("pass", [{"severity": "review", "message": "consider tightening spacing"}]))
+            tier2_ref = self._render_check_report(run, item)
+            self._set_adoption_evidence(run, item, tier1_ref=tier1_ref, tier2_ref=tier2_ref)
+        report = self.report(run)
+        self.assertIn("| A | 77.78 | ADOPTABLE |", report)
+
+    def test_static_tier1_rejects_malformed_findings(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._static_check_report(
+            run, "A", tier1=("pass", [{"severity": "urgent", "message": "bad severity value"}]))
+        self._set_adoption_evidence(run, "A", tier1_ref=ref)
+        report = self.report(run)
+        self.assertIn("tier1 evidence report has malformed findings", report)
+
+    def test_scoped_v1_rejects_typed_tier_evidence_when_source_sha256_mismatched(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._static_check_report(run, "A", source_sha256="f" * 64)
+        self._set_adoption_evidence(run, "A", tier1_ref=ref)
+        report = self.report(run)
+        self.assertIn("tier1 evidence report does not match this item's source_sha256", report)
+
+    def test_scoped_v1_rejects_typed_tier_evidence_when_source_tree_sha256_declared_and_mismatched(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        folder = run / "round-1"
+        stored = json.loads((folder / "round.json").read_text())
+        stored["source_tree_sha256"] = {item: "b" * 64 for item in stored["items"]}
+        (folder / "round.json").write_text(json.dumps(stored))
+        tier1_ref = self._static_check_report(run, "A", source_tree_sha256="c" * 64)
+        tier2_ref = self._render_check_report(run, "A", source_tree_sha256="c" * 64)
+        self._set_adoption_evidence(run, "A", tier1_ref=tier1_ref, tier2_ref=tier2_ref)
+        report = self.report(run)
+        self.assertIn("evidence report does not match this item's source_tree_sha256", report)
+
+    def test_render_tier2_rejects_rubric_sha256_mismatch(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._render_check_report(run, "A", rubric_sha256="e" * 64)
+        self._set_adoption_evidence(run, "A", tier2_ref=ref)
+        report = self.report(run)
+        self.assertIn("tier2 evidence report does not match this round's rubric_sha256", report)
+
+    def test_render_tier2_rejects_missing_rubric_sha256_when_round_declares_one(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._render_check_report(run, "A", omit_rubric=True)
+        self._set_adoption_evidence(run, "A", tier2_ref=ref)
+        report = self.report(run)
+        self.assertIn("tier2 evidence report does not match this round's rubric_sha256", report)
+
+    def test_render_tier2_requires_an_explicit_empty_findings_list(self):
+        run = self.adoption_run()
+        self._mark_scoped_v1(run)
+        ref = self._render_check_report(run, "A", tier2=("pass", None))
+        self._set_adoption_evidence(run, "A", tier2_ref=ref)
+        self.assertIn("tier2 evidence report does not show a clean pass", self.report(run))
+
+    def test_a_newly_created_legacy_unscoped_round_cannot_pass_on_old_handwritten_evidence(self):
+        # Per the judge's final selection review: typed adoption evidence is
+        # now forced for ANY round carrying a scope_contract key, including the
+        # legacy_unscoped compatibility marker, not only scoped_v1. A new round
+        # cannot opt into the "legacy" marker and then keep passing on a plain
+        # screenshot capture the way historically-unmarked rounds still can.
+        run = self.adoption_run()
+        folder = run / "round-1"
+        stored = json.loads((folder / "round.json").read_text())
+        design = run / "DESIGN.md"
+        design.write_text("# Design\n\nSynthetic design rationale for tests.\n")
+        design_digest = hashlib.sha256(design.read_bytes()).hexdigest()
+        for item in stored["items"]:
+            stored["evidence_manifest"][f"{item}/DESIGN.md"] = {"path": str(design), "sha256": design_digest}
+        stored["scope_contract"] = "legacy_unscoped"
+        (folder / "round.json").write_text(json.dumps(stored))
+        report = self.report(run)
+        self.assertIn(
+            "tier1 evidence must be a typed project_static_check report, not a screenshot reference", report)
+        self.assertIn("NOT_ADOPTABLE", report)
+
+    def test_capture_truncations_refuses_the_whole_run_not_just_the_flagged_item(self):
+        # round_prep persists capture_truncations to round.json before exiting
+        # nonzero on a clamped full-page screenshot; the council must never
+        # adopt a round built on a truncated capture, so it refuses the run
+        # outright rather than silently scoring around the flagged item.
+        run = self.adoption_run()
+        folder = run / "round-1"
+        stored = json.loads((folder / "round.json").read_text())
+        stored["capture_truncations"] = [{"item": "A", "path": "A/capture.png", "height": 6000}]
+        (folder / "round.json").write_text(json.dumps(stored))
+        with self.assertRaisesRegex(COUNCIL.RunError, "capture_truncations is non-empty"):
+            COUNCIL.run(run, write=True)
+
+    def test_historically_unmarked_round_adds_a_nonblocking_self_declared_note_without_flipping_outcome(self):
+        # A round with no scope_contract key at all is the one case that keeps
+        # its pre-Issue-13 loose, self-declared tier outcome; the new note is
+        # purely informational and must not change ADOPTABLE/NOT_ADOPTABLE.
+        run = self.adoption_run()
+        self.assertNotIn("scope_contract", json.loads((run / "round-1/round.json").read_text()))
+        report = self.report(run)
+        self.assertIn("| A | 77.78 | ADOPTABLE |", report)
+        self.assertIn("tier checks self-declared (legacy binding)", report)
+
+    def test_source_tree_sha256_must_identify_every_item_when_present(self):
+        run = self.adoption_run()
+        folder = run / "round-1"
+        stored = json.loads((folder / "round.json").read_text())
+        stored["source_tree_sha256"] = {"A": "a" * 64}
+        (folder / "round.json").write_text(json.dumps(stored))
+        with self.assertRaisesRegex(COUNCIL.RunError, "source_tree_sha256 must identify every item"):
+            COUNCIL.run(run, write=True)
 
     def test_default_catalogue_has_explicit_categories_and_total_weight_100(self):
         rubric = self.rubric()

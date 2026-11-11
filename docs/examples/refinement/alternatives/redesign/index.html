@@ -4,19 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Evidence explorer — coherent redesign fixture</title>
+  <link rel="stylesheet" href="tokens.css">
   <style>
-    :root {
-      color-scheme: light dark;
-      --ink: #20232a;
-      --surface: #ffffff;
-      --accent: #0645ad;
-      --line: #727985;
-      --focus: #0645ad;
-      --space: 1.25rem;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root { --ink: #f0f2f5; --surface: #17191e; --accent: #9abaff; --line: #a6acb6; --focus: #9abaff; }
-    }
+    :root { --space: 1.25rem; }
     * { box-sizing: border-box; }
     body { margin: 0; color: var(--ink); background: var(--surface); font: 16px/1.5 system-ui, sans-serif; }
     header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space); padding: 1rem 1.5rem; border-bottom: 1px solid var(--line); }
