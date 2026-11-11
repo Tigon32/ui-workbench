@@ -102,14 +102,16 @@ def validate(brief, exploration, *, root=None, brief_path=None):
         if not isinstance(decision, dict):
             problem("invalid_authority", "Each decision must be an object.")
             continue
-        if (decision.get("owner") not in {"sponsor", "agent"}
-                or decision.get("status") not in {"approved", "proposed", "unknown"}):
+        if scoped and not INTAKE.member(decision.get("topic"), {"scope", "primary_job", "quality", "how", "other"}):
+            problem("invalid_authority_topic", "Scoped decisions need an explicit topic.")
+        if (not INTAKE.member(decision.get("owner"), {"sponsor", "agent"})
+                or not INTAKE.member(decision.get("status"), {"approved", "proposed", "unknown"})):
             problem("invalid_authority_enum", "Decision owner/status must use the declared enums.")
-        if decision.get("topic") in {"scope", "primary_job"} and decision.get("owner") != "sponsor":
+        if INTAKE.member(decision.get("topic"), {"scope", "primary_job"}) and decision.get("owner") != "sponsor":
             problem("judge_exceeded_authority", "Scope and primary-job decisions cannot be agent delegated.")
         if decision.get("owner") == "sponsor" and decision.get("status") == "approved":
             ref = decision.get("approval_source_ref")
-            source = source_map.get(ref)
+            source = source_map.get(ref) if INTAKE.text(ref) else None
             if (not source or source.get("kind") != "sponsor_approval"
                     or scoped and not INTAKE.sponsor_approved(brief, decision.get("id"))):
                 problem(
@@ -274,7 +276,9 @@ def validate(brief, exploration, *, root=None, brief_path=None):
         if not isinstance(objection, dict) or not isinstance(objection.get("id"), str):
             problem("invalid_objection", "Each objection needs a stable id.")
             continue
-        if objection.get("raised_by") not in ROLES:
+        if scoped and not INTAKE.member(objection.get("topic"), {"scope", "primary_job", "quality", "how", "other"}):
+            problem("invalid_objection_topic", "Scoped objections need an explicit topic.")
+        if not INTAKE.member(objection.get("raised_by"), ROLES):
             problem(
                 "invalid_objection_role",
                 f"Objection {objection['id']!r} must identify the advisor, adversary or judge who raised it.",
@@ -291,7 +295,8 @@ def validate(brief, exploration, *, root=None, brief_path=None):
         elif ruling.get("status") not in {"resolved", "deferred_noncritical"}:
             problem("invalid_ruling", f"Objection {objection['id']!r} has no valid disposition.")
         if ruling and ruling.get("decision_status") == "approved":
-            decision = decisions.get(ruling.get("decision_id"))
+            decision_ref = ruling.get("decision_id")
+            decision = decisions.get(decision_ref) if INTAKE.text(decision_ref) else None
             if ruling.get("judge_role") == "judge" and (
                 ruling.get("decision_owner") == "sponsor"
                 or (decision and decision.get("owner") == "sponsor")
@@ -302,13 +307,37 @@ def validate(brief, exploration, *, root=None, brief_path=None):
                     objection_id=objection.get("id"),
                 )
         if scoped and ruling:
-            if ruling.get("decision_owner") not in {None, "sponsor", "agent"}:
+            if (ruling.get("decision_owner") is not None
+                    and not INTAKE.member(ruling["decision_owner"], {"sponsor", "agent"})):
                 problem("invalid_authority_enum", "Ruling decision_owner must be sponsor or agent.")
-            if (objection.get("topic") in {"scope", "primary_job"}
+            scope_intake = brief.get("intake")
+            scope_intake = scope_intake if isinstance(scope_intake, dict) else {}
+            view_rows = scope_intake.get("views")
+            view_rows = view_rows if isinstance(view_rows, list) else []
+            protected_ids = {row["id"] for row in view_rows
+                             if isinstance(row, dict) and INTAKE.text(row.get("id"))}
+            keep = scope_intake.get("keep")
+            keep = keep if isinstance(keep, dict) else {}
+            keep_rows = keep.get("items")
+            keep_rows = keep_rows if isinstance(keep_rows, list) else []
+            protected_ids.update(row["id"] for row in keep_rows
+                                 if isinstance(row, dict) and INTAKE.text(row.get("id")))
+            if (INTAKE.member(objection.get("topic"), {"scope", "primary_job"})
+                    or INTAKE.member(objection.get("item_id"), protected_ids)
                     or ruling.get("narrows_scope") is True or ruling.get("deferred_views")):
                 if (ruling.get("status") != "resolved"
                         or ruling.get("narrows_scope") is True or ruling.get("deferred_views")):
-                    if not INTAKE.sponsor_approved(brief, ruling.get("sponsor_decision_ref")):
+                    subject = objection.get("item_id")
+                    subjects = [subject] if INTAKE.text(subject) else []
+                    deferred = ruling.get("deferred_views", [])
+                    if (not isinstance(deferred, list)
+                            or any(not INTAKE.member(key, protected_ids) for key in deferred)):
+                        problem("invalid_scope_deferral", "Deferred views must name declared scope items.")
+                        deferred = []
+                    subjects.extend(deferred)
+                    if not subjects or any(not INTAKE.sponsor_approved(
+                            brief, ruling.get("sponsor_decision_ref"), subject_id=key)
+                            for key in subjects):
                         problem("judge_exceeded_authority",
                                 "The judge cannot defer or narrow scope/primary jobs without a sponsor reference.")
 
@@ -554,11 +583,11 @@ def validate(brief, exploration, *, root=None, brief_path=None):
     }
 
 
-def refinement_route(exploration, selected_direction, brief=None, *, root=None):
+def refinement_route(exploration, selected_direction, brief=None, *, root=None, brief_path=None):
     """Describe the existing format-2 refinement handoff after council selection."""
     if brief is None:
         raise HandoffError("refinement routing requires the canonical scoped brief")
-    report = validate(brief, exploration, root=root)
+    report = validate(brief, exploration, root=root, brief_path=brief_path)
     if not report["refinement_handoff_permitted_after_selection"]:
         raise HandoffError("blocked or legacy exploration cannot route to refinement")
     direction = next(
@@ -575,6 +604,7 @@ def refinement_route(exploration, selected_direction, brief=None, *, root=None):
     return {
         "skill": "ui-prototype-council",
         "format_version": 2,
+        "scope_contract_version": 1,
         "canonical_brief_ref": refinement["canonical_brief_ref"],
         "selected_candidate": selected_direction,
         "scope_header": report["scope_header"],

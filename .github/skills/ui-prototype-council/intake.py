@@ -32,7 +32,7 @@ def date(value):
         return False
 
 
-def sponsor_approved(brief, decision_id):
+def sponsor_approved(brief, decision_id, *, subject_id=None):
     authority = brief.get("decision_authority", {})
     decisions = authority.get("decisions", []) if isinstance(authority, dict) else []
     sources = brief.get("sources", [])
@@ -41,6 +41,10 @@ def sponsor_approved(brief, decision_id):
         if not isinstance(decision, dict) or decision.get("id") != decision_id:
             continue
         if decision.get("owner") != "sponsor" or decision.get("status") != "approved":
+            return False
+        if subject_id is not None and (
+                not isinstance(decision.get("subject_ids"), list)
+                or subject_id not in decision["subject_ids"]):
             return False
         return any(
             isinstance(source, dict)
@@ -103,6 +107,7 @@ def validate(brief, *, root=None, directions=None, current_brief_path=None):
             or not sponsor_approved(brief, scope.get("decision_id"))
             or not any(isinstance(row, dict)
                        and row.get("id") == scope.get("decision_id")
+                       and row.get("topic") == "scope"
                        and row.get("approval_source_ref") == confirmation.get("source_ref")
                        for row in decisions)):
         problem("scope_unconfirmed", "Scope level or sponsor confirmation missing. Generation blocked.")
@@ -149,6 +154,14 @@ def validate(brief, *, root=None, directions=None, current_brief_path=None):
     in_ids = [ident for ident, view in view_map.items() if view.get("disposition") == "in"]
     if member(level, {"page", "flow", "product"}) and not in_ids:
         problem("invalid_view_inventory", "Page, flow and product scope need in-scope views.")
+    snapshot = {"level": level, "stage": scope.get("stage", "content"),
+                "view_dispositions": {ident: view.get("disposition")
+                                      for ident, view in view_map.items()}}
+    if (confirmation.get("scope_snapshot") != snapshot
+            or approval.get("scope_snapshot") != snapshot):
+        problem("scope_unconfirmed", "Scope level or sponsor confirmation missing. Generation blocked.")
+    if scope.get("stage") == "shell" and level != "product":
+        problem("invalid_scope_stage", "Only sponsor-confirmed product scope can use a shell stage.")
     journeys = intake.get("journeys", [])
     if not isinstance(journeys, list):
         journeys = []
@@ -214,13 +227,18 @@ def validate(brief, *, root=None, directions=None, current_brief_path=None):
     if not isinstance(priors, list):
         priors = []
         problem("invalid_prior_briefs", "Prior briefs must be an explicit list.")
+    if not priors and not text(intake.get("prior_briefs_none_reason")):
+        problem("prior_brief_history_missing", "Declare prior briefs or an explicit no-prior-brief reason.")
     for prior in priors:
         if (not isinstance(prior, dict) or not text(prior.get("id"))
                 or not digest(prior.get("sha256")) or not text(prior.get("purpose"))
                 or not (type(prior.get("round")) is int or text(prior.get("round")))
+                or not text(prior.get("confirmation_ref")) or not date(prior.get("date"))
                 or ("path" in prior and not text(prior["path"]))):
-            problem("invalid_prior_briefs", "Prior briefs need id, raw SHA-256, round and purpose.")
+            problem("invalid_prior_briefs", "Prior briefs need id, raw SHA-256, round, purpose, date and confirmation_ref.")
             continue
+        if not prior.get("path"):
+            problem("prior_brief_unavailable", f"Prior brief {prior['id']} needs a checkable local path.")
         same = False
         if prior.get("path"):
             path = Path(prior["path"])
@@ -232,6 +250,14 @@ def validate(brief, *, root=None, directions=None, current_brief_path=None):
                     problem("prior_brief_hash_mismatch", f"Prior brief {prior['id']} digest differs.")
                 old = json.loads(data)
                 same = isinstance(old, dict) and _signature(old) == _signature(brief)
+                old_intake = old.get("intake") if isinstance(old, dict) else None
+                old_scope = old_intake.get("scope") if isinstance(old_intake, dict) else None
+                old_confirmation = old_scope.get("sponsor_confirmation") if isinstance(old_scope, dict) else None
+                if isinstance(old_confirmation, dict) and (
+                        prior["confirmation_ref"] != old_confirmation.get("source_ref")
+                        or prior["date"] != old_confirmation.get("date")):
+                    problem("prior_brief_provenance_mismatch",
+                            f"Prior brief {prior['id']} confirmation reference/date differs from its recorded intake.")
             except (OSError, ValueError, UnicodeDecodeError) as error:
                 problem("prior_brief_unavailable", f"Prior brief {prior['id']} cannot be checked: {error}")
         if current_brief_path is not None:
@@ -284,7 +310,7 @@ def validate(brief, *, root=None, directions=None, current_brief_path=None):
                 row = by_view.get(view_id, {})
                 is_shell_stub = scope.get("stage") == "shell" and row.get("status") == "labelled_stub"
                 if row.get("status") != "covered" and not is_shell_stub and not sponsor_approved(
-                        brief, row.get("deferral_decision_ref")):
+                        brief, row.get("deferral_decision_ref"), subject_id=view_id):
                     problem("scope_coverage",
                             f"In-scope view {view_id} is not covered and has no sponsor-signed deferral.")
             dispositions = direction.get("keep_dispositions", [])
@@ -299,7 +325,7 @@ def validate(brief, *, root=None, directions=None, current_brief_path=None):
                         or not isinstance(row.get("evidence_refs"), list) or not row["evidence_refs"]
                         or any(not member(ref, sources) for ref in row["evidence_refs"])
                         or row.get("disposition") != expected
-                        and not sponsor_approved(brief, row.get("exception_decision_ref"))):
+                        and not sponsor_approved(brief, row.get("exception_decision_ref"), subject_id=key)):
                     problem("invalid_keep_disposition", f"Direction {ident} has an unsupported disposition for {key}.")
             direction_reports[ident] = {
                 **base, "assessment": "declared",
@@ -311,10 +337,13 @@ def validate(brief, *, root=None, directions=None, current_brief_path=None):
         coverage["covered"] = min(row["covered"] for row in direction_reports.values())
         coverage["reachable"] = min(row["reachable"] for row in direction_reports.values())
         coverage["assessment"] = "declared"
+    counts = (f"covered {coverage['covered']}/{coverage['total']} · "
+              f"reachable {coverage['reachable']}/{coverage['total']}"
+              if coverage["assessment"] == "declared"
+              else f"coverage not assessed ({coverage['total']} in-scope views)")
     label = (
         f"Scope: {level if member(level, LEVELS) else 'unconfirmed'} · {', '.join(in_ids) or 'component'} · "
-        f"covered {coverage['covered']}/{coverage['total']} · "
-        f"reachable {coverage['reachable']}/{coverage['total']} · excluded: "
+        f"{counts} · excluded: "
         + ("; ".join(f"{row['id']} ({row['reason']})" for row in excluded) or "none")
     )
     if level != "product":

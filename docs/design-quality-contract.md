@@ -93,7 +93,7 @@ If not applicable, record the exclusion and reason before scoring.
 Do not silently remove categories because a particular prototype omits their evidence.
 Unsupported native or human evidence remains explicit, not a browser pass.
 
-## Score semantics
+## Scope and refinement contract
 
 ### Scope intake and paired refinement (issue #13)
 
@@ -104,6 +104,12 @@ with shells/IA and journeys, then coverage, data display/density and craft.
 Sponsor authority cannot be delegated away by a council ruling. Stale brief
 reuse requires explicit fresh reconfirmation; undeclared history is not
 detectable. Domain artifact paths remain opaque, with explicit data classes.
+Confirmation and sponsor source bind an exact `scope_snapshot`: level, stage
+and view-disposition map. Changing exclusions or using a shell requires fresh
+sponsor evidence; shells are product-only. Explicit decision/objection topics
+prevent missing-topic delegation. History needs prior dates/confirmation refs
+or an explicit `prior_briefs_none_reason`. Claims still rely on honest recorded
+quotes, source contents and severity assignments, not authenticated signatures.
 
 New selection preparation can bind brief/directions files; selection and
 refinement reports show scope independently of craft. Content coverage counts
@@ -111,6 +117,11 @@ only `covered`, while a labelled shell stub establishes reachability alone.
 Refinement without current coverage evidence is `partial-scope` when it has
 in-scope views, even if its local quality goal is met. Legacy runs disclose
 undeclared scope and do not silently acquire product claims.
+New preparation records `scope_contract_version: 1` and requires both files;
+only explicit `--legacy-unscoped` can create unscoped compatibility artifacts.
+New refinement contracts also use this marker. Format-2 goal-stop verification
+now uses its already documented selected-point denominator, matching the report;
+the judge rejected retaining the inconsistent full-inventory calculation.
 
 Format-2 refinement may opt into `contract.keep_rule`:
 
@@ -169,6 +180,45 @@ foundations or specialists only for an actual need, and keep decoration
 subordinate to tasks. Static prototypes still use offline HTML/CSS and system
 fonts: no React dependency, registry fetch or external skill installation.
 A library is not an accessibility or licensing approval.
+
+### Issue #13 gap-council record
+
+The issue review and subsequent project-wide audit used separately tasked
+advisor, adversary and judge roles configured with Opus 5.5. Role separation
+does not establish independent models or human evidence. Implementation
+workers were configured separately. No new prototype score or user-study
+result was produced by this engineering audit; the retained dogfood selection
+attempts remain VOID.
+
+The project audit covered scope/WHAT authority and freshness, paired
+refinement/reporting, browser checks/captures, token generation, selection
+evidence/identity and their test/documentation contracts. The judge accepted
+14 findings, four with compatibility limits, and rejected a fifteenth claim
+that the corrected format-2 selected denominator should be reverted.
+
+| Area | Adjudicated gap and required correction |
+|---|---|
+| Scope inventory | Bind exclusions and stage to the sponsor-confirmed snapshot |
+| Authority | Require topics and item-specific sponsor authority for deferrals/exceptions |
+| Shells | Restrict stub coverage exceptions to confirmed product shells |
+| New/legacy boundary | Require scoped new-run markers or explicit legacy preparation |
+| Coverage reporting | Label unmeasured coverage, never present it as observed zero |
+| Prior briefs | Require declared history/provenance and fresh reconfirmation |
+| Browser isolation | Deny network and outside-folder reads before navigation, failing closed |
+| Token scales | Match generated type/spacing names and resolve declared units |
+| Colour provenance | Reject literal/page palettes while preserving forced-colour semantics |
+| Adoption checks | Bind typed passing check reports, not screenshot declarations |
+| Source identity | Include local assets and DESIGN.md in new-round source evidence |
+| Reviewer order | Store and enforce reviewer-specific randomized assignments |
+| Capture extent | Report truncation rather than silently hiding long-page content |
+| Readiness | Wait for fonts/layout and support a bounded explicit ready condition |
+
+These are engineering consistency checks, not signatures or a hostile-browser
+sandbox. Source authenticity, completeness of declared history, honest
+severity/topic labels, reviewer independence, native/assistive behavior and
+participant outcomes remain outside the audit's proof.
+
+## Score semantics
 
 Every dimension uses integer scores from 1 to 10.
 Anchors at 3, 5, 7 and 9 describe increasingly strong observed quality.

@@ -154,7 +154,9 @@ Per round:
    the profile decisions and evidence digests. Give each reviewer only each item's
    captures, `DESIGN.md` and `evidence-manifest.json`; never share `round.json` or
    `sealed.json` before scoring.
-   For scoped runs pass `--brief canonical-brief.json --directions directions.json`.
+   New runs require `--brief canonical-brief.json --directions directions.json`.
+   Use `--legacy-unscoped` only to explicitly reproduce an old unscoped run;
+   it is recorded, never silently inferred.
    The latter is a JSON list naming every non-calibration prototype exactly as
    in `NAME=FOLDER`, with `view_coverage` and `keep_dispositions` from the
    validated handoff. Both files are hash-bound, and the report recomputes scope
@@ -234,6 +236,10 @@ semantics; do not reinterpret them as format 2.
    co-target is flat; show unmet targets as notes. Any regression still blocks,
    even inside the noise band. Report baseline drift separately from paired
    candidate gains. No rule means the historical all-targets keep semantics.
+   Set `contract.scope_contract_version: 1` for new ledgers. This marker
+   requires scoped intake independently of the chosen keep rule. Unmarked
+   historical ledgers stay readable. Format-2 goal stops use the documented
+   selected-point denominator, matching the report (a verifier correction).
 5. **Log.** Append the attempted change, before/after evidence, deltas, decision
    and retained source to the iteration ledger. Complete measurement and the
    keep/revert record before the next increment starts. Rejected attempts count
@@ -391,8 +397,8 @@ together.
 | `design_tokens.py` | `17fe482b02db00e0298401c0e4012fec9ca205ef0f6594a122bf22448b7fdf17` |
 | `round_prep.py` | `7d27f710b5ffb1585a166b58bebb407ee7cff05c90da3c61c93f108feb14931f` |
 | `profiles.py` | `5aa738737f451df62aced9e3b99a4648b793169cfe3ad094d3719cffd7cc5df5` |
-| `iterations.py` | `f487499199cb6064584876fa3651f4e32d9f1c0637323e768140f8a2314057e1` |
-| `intake.py` | `f352f38d999eb34946236ebb1446094a75ab575bf3a85e01f3c3419715e37c37` |
+| `iterations.py` | `320aa6b7b9261f5930a357b2e0a56b66705d2ab1b94c1d317febc2150cb33279` |
+| `intake.py` | `46b62b63a57ca30ecdbf35348eceee376d6760e9e6a60a9ffbc3a7021e4a344d` |
 
 The default catalogue is also pinned:
 

@@ -28,6 +28,16 @@ class WhatCouncilTest(unittest.TestCase):
     def codes(report):
         return {finding["code"] for finding in report["findings"]}
 
+    def approve_scope(self):
+        intake = self.brief["intake"]
+        confirmation = intake["scope"]["sponsor_confirmation"]
+        snapshot = {"level": intake["scope"]["level"],
+                    "stage": intake["scope"].get("stage", "content"),
+                    "view_dispositions": {v["id"]: v["disposition"] for v in intake["views"]}}
+        confirmation["scope_snapshot"] = snapshot
+        next(s for s in self.brief["sources"] if s["id"] == confirmation["source_ref"])[
+            "scope_snapshot"] = snapshot
+
     def test_synthetic_example_is_local_exploratory_and_preserves_distinctions(self):
         schema = json.loads((SKILL / "exploration.schema.json").read_text())
         self.assertEqual(self.exploration["format_version"],
@@ -263,6 +273,7 @@ class WhatCouncilTest(unittest.TestCase):
         intake["artifacts"] = [{"path": "/not/read/secret.bpmn", "data_class": "confidential"}]
         for direction in self.exploration["directions"]:
             direction["view_coverage"] = []
+        self.approve_scope()
         report = WHAT_COUNCIL.validate(self.brief, self.exploration)
         self.assertEqual(report["handoff_status"], "exploratory")
         self.assertIn("Scope: component", report["scope_header"])
@@ -277,6 +288,7 @@ class WhatCouncilTest(unittest.TestCase):
         for direction in self.exploration["directions"]:
             if direction["eligible"]:
                 direction["view_coverage"].append({"view_id": "settings", "status": "labelled_stub", "evidence_refs": ["synthetic-job-record"]})
+        self.approve_scope()
         report = WHAT_COUNCIL.validate(self.brief, self.exploration)
         self.assertEqual(report["coverage"]["covered"], 1)
         self.assertEqual(report["coverage"]["reachable"], 2)
@@ -291,11 +303,18 @@ class WhatCouncilTest(unittest.TestCase):
             self.exploration["brief_version"] = "2.1"
             self.brief["intake"]["prior_briefs"] = [{
                 "id": "prior", "path": str(path), "sha256": digest,
-                "round": 1, "purpose": "page exploration", "date": "2026-11-10",
-                "confirmation_ref": "old-scope"}]
+                "round": 1, "purpose": "page exploration", "date": "2026-11-11",
+                "confirmation_ref": "scope-approval"}]
             report = WHAT_COUNCIL.validate(self.brief, self.exploration)
             self.assertIn("brief_stale", self.codes(report))
             self.brief["intake"]["scope"]["sponsor_confirmation"]["reconfirms"] = [digest]
+            self.assertIn("brief_stale", self.codes(WHAT_COUNCIL.validate(self.brief, self.exploration)))
+            source = copy.deepcopy(self.brief["sources"][0])
+            source.update({"id": "fresh-scope", "date": "2026-11-12"})
+            self.brief["sources"].append(source)
+            self.brief["intake"]["scope"]["sponsor_confirmation"].update({
+                "source_ref": "fresh-scope", "date": "2026-11-12"})
+            self.brief["decision_authority"]["decisions"][0]["approval_source_ref"] = "fresh-scope"
             self.assertNotIn("brief_stale", self.codes(WHAT_COUNCIL.validate(self.brief, self.exploration)))
 
     def test_agent_scope_narrowing_and_enum_bypass_are_blocked(self):
@@ -311,6 +330,30 @@ class WhatCouncilTest(unittest.TestCase):
         for data_class in (None, "whatever"):
             result = WHAT_COUNCIL.preflight("data-sharing", "declared-approval", data_class)
             self.assertEqual(result["status"], "denied")
+
+    def test_scoped_decisions_and_objections_cannot_omit_topics(self):
+        for rows, code in [
+            (self.brief["decision_authority"]["decisions"], "invalid_authority_topic"),
+            (self.brief["what_council"]["objections"], "invalid_objection_topic"),
+        ]:
+            topic = rows[0].pop("topic")
+            self.assertIn(code, self.codes(WHAT_COUNCIL.validate(self.brief, self.exploration)))
+            rows[0]["topic"] = topic
+
+    def test_view_deferral_needs_sponsor_even_if_relabelled_how(self):
+        objection = self.brief["what_council"]["objections"][0]
+        objection.update({"topic": "how", "item_id": "evidence"})
+        self.brief["what_council"]["rulings"][0]["status"] = "deferred_noncritical"
+        self.assertIn("judge_exceeded_authority",
+                      self.codes(WHAT_COUNCIL.validate(self.brief, self.exploration)))
+        self.brief["decision_authority"]["decisions"][0]["subject_ids"] = ["evidence"]
+        ruling = self.brief["what_council"]["rulings"][0]
+        ruling["sponsor_decision_ref"] = "scope"
+        self.assertNotIn("judge_exceeded_authority",
+                         self.codes(WHAT_COUNCIL.validate(self.brief, self.exploration)))
+        ruling["deferred_views"] = ["unapproved-view"]
+        self.assertIn("invalid_scope_deferral",
+                      self.codes(WHAT_COUNCIL.validate(self.brief, self.exploration)))
 
 
 if __name__ == "__main__":

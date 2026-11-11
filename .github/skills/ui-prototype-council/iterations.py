@@ -834,6 +834,11 @@ def verify(path):
     if format_version == 2:
         brief, version_history, version_mappings = _validate_v2_contract(
             path.parent, contract, artifacts, points)
+        if "scope_contract_version" in contract:
+            _require(type(contract["scope_contract_version"]) is int
+                     and contract["scope_contract_version"] == 1
+                     and isinstance(brief.get("intake"), dict),
+                     "scope contract version 1 requires a sponsor-confirmed scoped intake")
         comparison_point_ids = list(dict.fromkeys(
             point_id for version in version_history for point_id in version["point_ids"]))
         keep_rule_contract = _validate_keep_rule_contract(contract)
@@ -843,6 +848,8 @@ def verify(path):
     else:
         comparison_point_ids = point_ids
         _require("keep_rule" not in contract, "contract.keep_rule is format-2 only")
+        _require("scope_contract_version" not in contract,
+                 "scope contract marker is format-2 only")
         keep_rule_contract = None
     for field in ("elapsed_minutes", "review_effort_minutes", "verification_elapsed_seconds"):
         value = contract.get(field)

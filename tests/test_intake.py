@@ -51,12 +51,17 @@ class ScopeIntakeTest(unittest.TestCase):
             path.write_bytes(raw)
             self.brief["intake"]["prior_briefs"] = [{
                 "id": "old", "path": str(path), "sha256": hashlib.sha256(raw).hexdigest(),
-                "round": 4, "purpose": "page refinement"}]
+                "round": 4, "purpose": "page refinement",
+                "date": "2026-11-11", "confirmation_ref": "scope-approval"}]
             report = INTAKE.validate(self.brief, current_brief_path=path)
             self.assertIn({
                 "code": "brief_stale", "severity": "blocker",
                 "message": "Brief old is identical to round 4's brief written for page refinement. Sponsor must reconfirm scope before reuse."},
                 report["findings"])
+            edited = Path(directory) / "edited.json"
+            edited.write_text(json.dumps(self.brief, indent=4))
+            self.assertIn("brief_stale", {
+                f["code"] for f in INTAKE.validate(self.brief, current_brief_path=edited)["findings"]})
 
     def test_untyped_input_is_blocked_without_crashing(self):
         for parent, key, value in [
@@ -92,3 +97,48 @@ class ScopeIntakeTest(unittest.TestCase):
             {"id": "same", "view_ids": ["one", "two"]}] * 2
         codes = {f["code"] for f in INTAKE.validate(self.brief)["findings"]}
         self.assertIn("journeys_missing", codes)
+
+    def test_inventory_and_shell_stage_require_explicit_sponsor_snapshot(self):
+        self.brief["intake"]["views"].append({
+            "id": "architecture", "disposition": "out", "reason": "Agent cut to P0."})
+        self.assertIn("scope_unconfirmed", {
+            f["code"] for f in INTAKE.validate(self.brief)["findings"]})
+        self.brief["intake"]["scope"]["stage"] = "shell"
+        self.assertIn("invalid_scope_stage", {
+            f["code"] for f in INTAKE.validate(self.brief)["findings"]})
+
+    def test_unmeasured_coverage_is_not_reported_as_zero(self):
+        header = INTAKE.validate(self.brief)["scope_header"]
+        self.assertIn("coverage not assessed", header)
+        self.assertNotIn("covered 0/", header)
+
+    def test_deferral_cannot_reuse_an_unrelated_sponsor_approval(self):
+        direction = {"id": "deferred", "view_coverage": [{
+            "view_id": "evidence", "status": "deferred", "deferral_decision_ref": "scope"}],
+            "keep_dispositions": [{
+                "id": "provenance", "disposition": "keep", "evidence_refs": ["synthetic-job-record"]}]}
+        report = INTAKE.validate(self.brief, directions=[direction])
+        self.assertIn("scope_coverage", {f["code"] for f in report["findings"]})
+        self.brief["decision_authority"]["decisions"][0]["subject_ids"] = ["evidence"]
+        report = INTAKE.validate(self.brief, directions=[direction])
+        self.assertNotIn("scope_coverage", {f["code"] for f in report["findings"]})
+
+    def test_declared_history_requires_reason_and_prior_provenance(self):
+        self.brief["intake"].pop("prior_briefs_none_reason")
+        self.assertIn("prior_brief_history_missing", {
+            f["code"] for f in INTAKE.validate(self.brief)["findings"]})
+        prior = {"id": "old", "sha256": "a" * 64, "round": 1,
+                 "purpose": "page refinement", "date": "2026-11-11",
+                 "confirmation_ref": "scope-approval"}
+        self.brief["intake"]["prior_briefs"] = [prior]
+        for field in ("date", "confirmation_ref"):
+            with self.subTest(field=field):
+                value = prior.pop(field)
+                self.assertIn("invalid_prior_briefs", {
+                    f["code"] for f in INTAKE.validate(self.brief)["findings"]})
+                prior[field] = value
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "current.json"
+            path.write_text(json.dumps(self.brief, indent=4))
+            report = INTAKE.validate(self.brief, current_brief_path=path)
+            self.assertIn("prior_brief_unavailable", {f["code"] for f in report["findings"]})

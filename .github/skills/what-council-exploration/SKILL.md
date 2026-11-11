@@ -47,6 +47,10 @@ independence.
    page, flow or product scope and view inventory, not from the last brief.
    Record the verbatim sponsor quote, date, actor, source and sponsor-owned
    decision. Prior briefs are sources only: reconfirm their applicability.
+   The confirmation and its cited sponsor source must both contain
+   `scope_snapshot` with `level`, `stage` (content or product shell) and an
+   exact `view_dispositions` id-to-disposition map. Inventory/stage changes
+   invalidate that approval until the sponsor confirms the new snapshot.
    Add the version-1 `intake` block to the canonical structured brief using
    [intake.schema.json](intake.schema.json). Preserve its version, users/jobs,
    outcomes, scenarios, constraints, platforms, evidence, unknowns, budget and
@@ -134,12 +138,18 @@ bytes and canonically unchanged jobs/constraints trigger reconfirmation even
 after a version-only edit. A fresh sponsor source explicitly lists the prior
 digest in `sponsor_confirmation.reconfirms`; record the prior date and
 confirmation reference. History completeness and authenticity are not provable.
+An empty history needs `prior_briefs_none_reason`; each prior needs its date
+and original confirmation reference. All scoped decisions and objections need
+an explicit `topic`: scope, primary_job, quality, how or other. A view or KEEP
+objection cannot be deferred by relabelling it as HOW.
 
 Each direction supplies `view_coverage` entries with `view_id`, status and
 `evidence_refs`, and `keep_dispositions` with id, disposition and evidence.
 Only `covered` counts as content coverage. `labelled_stub` counts as reachable
 in a declared shell round, never as covered. Other omissions need a
 `deferral_decision_ref` resolving to an approved sponsor decision.
+Deferrals and KEEP exceptions need that decision's `subject_ids` to name
+the exact view/KEEP id; an unrelated sponsor approval is not reusable authority.
 Reports start with computed scope, covered/total, reachable/total and exclusions;
 coverage is never blended with craft. Below product scope, a result cannot be
 claimed as a new product interface.
