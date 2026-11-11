@@ -13,8 +13,9 @@ approve a product design.
 
 ## Authority and safety
 
-Use the target project's contributor rules, accepted decisions, existing
-structured brief and implementation. Treat missing evidence as unknown.
+Use the target project's contributor rules, accepted decisions and current
+implementation. Confirm scope before selecting a prior brief as a source.
+Treat missing evidence as unknown.
 Retain the format-2 structured brief as the canonical source of truth; extend
 it with source, confidence, assumption and council records rather than
 creating a second brief. Existing format-1 and format-2 refinement ledgers
@@ -42,7 +43,16 @@ independence.
 
 ## Workflow
 
-1. **Start from the existing brief.** Preserve its version, users/jobs,
+1. **Confirm scope with the sponsor.** Start from the declared component,
+   page, flow or product scope and view inventory, not from the last brief.
+   Record the verbatim sponsor quote, date, actor, source and sponsor-owned
+   decision. Prior briefs are sources only: reconfirm their applicability.
+   The confirmation and its cited sponsor source must both contain
+   `scope_snapshot` with `level`, `stage` (content or product shell) and an
+   exact `view_dispositions` id-to-disposition map. Inventory/stage changes
+   invalidate that approval until the sponsor confirms the new snapshot.
+   Add the version-1 `intake` block to the canonical structured brief using
+   [intake.schema.json](intake.schema.json). Preserve its version, users/jobs,
    outcomes, scenarios, constraints, platforms, evidence, unknowns, budget and
    decision authority. Add source references and confidence to material
    claims; record assumptions with owner and treatment. Keep user needs,
@@ -55,6 +65,10 @@ independence.
      invented approvals.
    - The judge records a reasoned resolution, revision or blocker for each
      objection. The judge cannot approve sponsor-owned decisions.
+     Nor may the judge narrow or defer scope, in-scope views or the primary
+     job using agent-delegated authority. Cite an already approved sponsor
+     decision for such a change. Scope/primary-job questions cannot block
+     "nothing"; give them an explicit blocking stage.
 
    Record who or what filled each role, how it was run, distinct
    perspectives, objections, rulings and open questions. Missing roles or
@@ -73,7 +87,12 @@ independence.
    candidates with incompatible inputs; rerun them under a common version or
    report separate, incomparable groups. Show every state without evidence
    as unassessed.
-5. **Explore at least two HOW directions.** Derive materially different
+5. **Explore at least two HOW directions.** For product scope, first compare
+   shells/information architecture and cross-view journeys at mid fidelity.
+   Label stubs: they establish declared reachability, not content coverage.
+   Page rounds follow inside the sponsor-selected shell. Resolve missing
+   coverage and structure before density, data-display and craft passes.
+   Derive materially different
    information architectures or interaction models from exactly the same
    WHAT, fixture, tasks, constraints, platforms and rubric. Describe each
    direction's organizing principle and task/state coverage. A qualitative
@@ -92,9 +111,59 @@ independence.
    a model review does not become human evidence. Static browser evidence
    does not establish native, assistive-technology or usability outcomes.
 
+## Tiered intake and coverage
+
+| Input | Component | Page / flow | Product |
+|---|---|---|---|
+| Sponsor-confirmed scope, KEEP/CHANGE/DROP or explicit none reason, quality target | Required | Required | Required |
+| View inventory: in, context, out with reasons | Optional | All in-scope views and captures | All views and captures |
+| Personas, jobs and journeys | Lightweight job/constraint | Jobs; flow has a cross-view journey | Jobs and at least two cross-view journeys |
+| Domain artifact paths and `data_class` | Optional | If rendered | Explicit artifacts or none reason |
+| Quality targets | Component | Component and page | Component, page and product |
+| Delivery context and visual/density references | Optional | Optional | Optional |
+
+KEEP defaults to "behaviour reachable; form may vary". Prefer about ten focused
+items, each with a WHAT, reason and evidence source. Every eligible direction
+records a disposition for every id; exceptions require sponsor authority.
+The validator does not parse BPMN, DMN, C4, glossary or data-contract contents.
+Use shape-preserving synthetic fixtures and project-owned platform constraints.
+
+New comparisons use exploration format 2; missing intake blocks generation.
+Format-1 exploration remains readable as `legacy_unscoped`, never ready for
+selection or refinement. Existing format-1/2 refinement ledgers keep their
+original meaning. The local validator emits `scope_unconfirmed`, `brief_stale`,
+`scope_question_parked`, `keep_list_missing` and `scope_coverage` with actionable
+messages. Supply prior brief paths/digests, round and purpose. Raw identical
+bytes and canonically unchanged jobs/constraints trigger reconfirmation even
+after a version-only edit. A fresh sponsor source explicitly lists the prior
+digest in `sponsor_confirmation.reconfirms`; record the prior date and
+confirmation reference. History completeness and authenticity are not provable.
+An empty history needs `prior_briefs_none_reason`; each prior needs its date
+and original confirmation reference. All scoped decisions and objections need
+an explicit `topic`: scope, primary_job, quality, how or other. A view or KEEP
+objection cannot be deferred by relabelling it as HOW.
+
+Each direction supplies `view_coverage` entries with `view_id`, status and
+`evidence_refs`, and `keep_dispositions` with id, disposition and evidence.
+Only `covered` counts as content coverage. `labelled_stub` counts as reachable
+in a declared shell round, never as covered. Other omissions need a
+`deferral_decision_ref` resolving to an approved sponsor decision.
+Deferrals and KEEP exceptions need that decision's `subject_ids` to name
+the exact view/KEEP id; an unrelated sponsor approval is not reusable authority.
+Reports start with computed scope, covered/total, reachable/total and exclusions;
+coverage is never blended with craft. Below product scope, a result cannot be
+claimed as a new product interface.
+
+Record optional `delivery_context`: consuming stack, existing components,
+approved libraries, token source and motion policy. Prefer existing project
+components over rebuilding behavior. This is HOW context, not project WHAT or
+permission to import a library into a static prototype. The downstream
+generator prompt retains offline, no-framework and system-font constraints.
+
 ## Local validator and example
 
-The standard-library validator checks recorded roles, rulings, authorities,
+The standard-library validator and shared `ui-prototype-council/intake.py`
+check recorded scope, rulings, authorities,
 input revisions, candidate compatibility, state coverage, qualitative
 distinctness declarations and downstream handoff fields. It flags
 unsupported sponsor approvals, promoted delegated assumptions, unattributed

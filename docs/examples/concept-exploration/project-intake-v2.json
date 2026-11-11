@@ -1,5 +1,32 @@
 {
   "brief_version": "2.0",
+  "intake": {
+    "version": 1,
+    "scope": {
+      "level": "page",
+      "decision_id": "scope",
+      "sponsor_confirmation": {
+        "quote": "Synthetic example only: explore the evidence page, not the whole product.",
+        "date": "2026-11-11",
+        "actor": "fictional-example-sponsor",
+        "source_ref": "scope-approval",
+        "scope_snapshot": {"level": "page", "stage": "content", "view_dispositions": {"evidence": "in"}}
+      }
+    },
+    "views": [{"id": "evidence", "disposition": "in", "capture_refs": ["synthetic-job-record"]}],
+    "keep": {"items": [{"id": "provenance", "kind": "keep", "what": "Keep provenance reachable; form may vary.", "reason": "The analyst needs the source.", "evidence_ref": "synthetic-job-record"}]},
+    "artifacts": [],
+    "journeys": [],
+    "quality_targets": {"component": "Preserve labelled actions.", "page": "Expose provenance and uncertainty."},
+    "prior_briefs": [],
+    "prior_briefs_none_reason": "This synthetic example is the first scope round.",
+    "delivery_context": {
+      "stack": "Offline static HTML/CSS prototype; consuming stack not selected.",
+      "existing_components": ["Labelled native buttons and tables"],
+      "token_source": "synthetic-design-system",
+      "motion_policy": "No decorative motion required."
+    }
+  },
   "status": "incomplete",
   "users_and_jobs": [
     "Synthetic desktop analyst finding a record and deciding whether its source warrants follow-up."
@@ -37,23 +64,26 @@
     "No real-user, accessibility, product-approval, creativity or usability claim."
   ],
   "unresolved_questions": [
-    "Sponsor has not approved the illustrative score target or adoption gate."
+    {"id": "quality-goal", "topic": "quality", "blocks": "acceptance", "question": "Sponsor has not approved the illustrative score target or adoption gate."}
   ],
   "critical_unknowns": [
     "Sponsor decision on the illustrative project quality goal."
   ],
   "decision_authority": {
-    "sponsor_decisions": ["project-quality-goal"],
+    "sponsor_decisions": ["project-quality-goal", "scope"],
     "agent_delegated_decisions": ["concept-structure"],
     "decisions": [
+      {"id": "scope", "topic": "scope", "owner": "sponsor", "status": "approved", "decision": "Page scope only.", "approval_source_ref": "scope-approval"},
       {
         "id": "project-quality-goal",
+        "topic": "quality",
         "owner": "sponsor",
         "status": "proposed",
         "decision": "Approve or revise the illustrative project-owned target."
       },
       {
         "id": "concept-structure",
+        "topic": "how",
         "owner": "agent",
         "status": "approved",
         "decision": "Propose and compare layouts within the shared WHAT; do not ask for approval of each delegated detail."
@@ -61,6 +91,7 @@
     ]
   },
   "sources": [
+    {"id": "scope-approval", "kind": "sponsor_approval", "reference": "synthetic:scope-record", "quote": "Synthetic example only: explore the evidence page, not the whole product.", "date": "2026-11-11", "actor": "fictional-example-sponsor", "scope_snapshot": {"level": "page", "stage": "content", "view_dispositions": {"evidence": "in"}}},
     {
       "id": "synthetic-job-record",
       "kind": "synthetic_project_record",
@@ -145,6 +176,7 @@
     "objections": [
       {
         "id": "layout-is-not-a-user-need",
+        "topic": "how",
         "raised_by": "adversary",
         "severity": "material",
         "item_id": "suggested-filter-rail",
@@ -152,6 +184,7 @@
       },
       {
         "id": "score-goal-needs-sponsor",
+        "topic": "quality",
         "raised_by": "adversary",
         "severity": "critical",
         "item_id": "project-quality-goal",

@@ -455,6 +455,171 @@ class IterationLedgerTest(unittest.TestCase):
         self.assertEqual(report["findings"]["recurring_finding_identities"], 1)
         self.assertEqual(report["progress_by_reviewer_kind"]["generator_self_assessment"], 1)
 
+    def multi_gain_ledger(self):
+        path, ledger = self.create_v2_ledger()
+        attempt = ledger["iterations"][0]
+        example = json.loads((ROOT / "docs/examples/concept-exploration/project-intake-v2.json").read_text())
+        def scope_brief(data):
+            data["intake"] = example["intake"]
+            data["intake"]["scope"]["level"] = "component"
+            data["intake"]["views"] = []
+            data["intake"]["keep"] = {"none_reason": "This fixture has no preserved behavior."}
+            data["sources"] = example["sources"]
+            data["unresolved_questions"] = []
+            data["decision_authority"]["sponsor_decisions"].append("scope")
+            data["decision_authority"]["decisions"].append(example["decision_authority"]["decisions"][0])
+            snapshot = {"level": "component", "stage": "content", "view_dispositions": {}}
+            data["intake"]["scope"]["sponsor_confirmation"]["scope_snapshot"] = snapshot
+            data["sources"][0]["scope_snapshot"] = snapshot
+        self.rewrite_json_artifact(ledger, ledger["contract"]["brief_ref"], scope_brief)
+        ledger["contract"]["scope_contract_version"] = 1
+        rule = {
+            "id": "multi_gain_v2", "min_improved": 3, "min_gain": 1, "noise_band": 0.5,
+            "panel": {"reviewers": [{"id": "fixture-panel", "kind": "generator_self_assessment",
+                                      "model": "synthetic-not-run"}], "repeats": 2}}
+        ledger["contract"]["keep_rule"] = rule
+        attempt["dimensions"] = ["p1", "p2", "p3", "p4"]
+        attempt["expected_gain"] = {key: 1 for key in attempt["dimensions"]}
+        attempt["affected_points"] = [f"p{i}" for i in range(1, 6)]
+        values = {"p1": 8, "p2": 7, "p3": 7, "p4": 6, "p5": 6}
+        for refs, after in ((attempt["before"], False), (attempt["after"], True)):
+            def update(data):
+                for key, point in data["points"].items():
+                    point.update({
+                        "score": values[key] if after else 6,
+                        "evidence_status": "observed", "reason": "Synthetic paired fixture.",
+                        "evidence": ["evidence.txt"], "assessed_source_ref": refs["source_ref"],
+                        "assessment_state": "fresh", "review_required": False,
+                        "evidence_coverage": {"evidence.txt": {
+                            "point_ids": [key], "scenario_ids": ["dense-dark-desktop"],
+                            "declaration": "Synthetic fixture coverage."}}})
+            self.rewrite_json_artifact(ledger, refs["scores_ref"], update)
+        paired_ref = self.artifact("attempt-1/paired.json", {
+            "schema_version": 1, "attempt_id": 1, "rule_id": "multi_gain_v2",
+            "panel_id": "synthetic-pair-1", "panel": rule["panel"],
+            "before_source_ref": attempt["before"]["source_ref"],
+            "after_source_ref": attempt["after"]["source_ref"],
+            "points": {key: {"baseline": [6, 6], "candidate": [value, value]}
+                       for key, value in values.items()}})
+        attempt["paired_scores_ref"] = paired_ref
+        attempt["actual_evidence"].append(paired_ref)
+        self.rewrite_json_artifact(ledger, attempt["proposal_ref"], lambda data: data.update({
+            "dimensions": attempt["dimensions"], "expected_gain": attempt["expected_gain"],
+            "affected_points": attempt["affected_points"], "keep_rule": rule}))
+        self.refresh_decision(ledger)
+        path.write_text(json.dumps(ledger))
+        return path, ledger
+
+    def test_multi_gain_keeps_concept_c_with_unmet_spacing_target(self):
+        path, _ = self.multi_gain_ledger()
+        result = ITERATIONS.report(ITERATIONS.verify(path))
+        attempt = result["attempt_reports"][0]
+        self.assertEqual(attempt["unmet_targets"], ["p4"])
+        self.assertEqual(attempt["paired_panel"]["points"]["p1"]["delta"], 2)
+        self.assertIn("Baseline drift", ITERATIONS.html_report(ITERATIONS.verify(path)))
+
+    def test_multi_gain_rejects_noise_regression_and_missing_panel_scores(self):
+        mutations = [
+            (lambda data: data["points"]["p5"].update({"candidate": [5, 6]}), "paired score regression"),
+            (lambda data: data["points"]["p1"].update({"candidate": [6, 7]}), "meaningful gains"),
+            (lambda data: data["points"]["p1"].update({"candidate": [None, 8]}), "unassessed paired"),
+            (lambda data: data.update({"after_source_ref": "baseline/source.json"}), "before/after sources"),
+            (lambda data: data["panel"].update({"repeats": 1}), "panel roster"),
+        ]
+        for mutation, error in mutations:
+            with self.subTest(error=error):
+                path, ledger = self.multi_gain_ledger()
+                self.rewrite_json_artifact(ledger, ledger["iterations"][0]["paired_scores_ref"], mutation)
+                self.refresh_decision(ledger)
+                path.write_text(json.dumps(ledger))
+                with self.assertRaisesRegex(ITERATIONS.LedgerError, error):
+                    ITERATIONS.verify(path)
+
+    def test_multi_gain_rule_cannot_be_changed_after_proposal_or_decision(self):
+        path, ledger = self.multi_gain_ledger()
+        ledger["contract"]["keep_rule"]["noise_band"] = 0
+        path.write_text(json.dumps(ledger))
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "proposal must freeze"):
+            ITERATIONS.verify(path)
+
+    def test_paired_baseline_drift_is_not_counted_as_candidate_gain(self):
+        path, ledger = self.multi_gain_ledger()
+        ref = ledger["iterations"][0]["paired_scores_ref"]
+        self.rewrite_json_artifact(ledger, ref, lambda data: data["points"]["p5"].update({
+            "baseline": [5, 6], "candidate": [5, 6]}))
+        self.refresh_decision(ledger)
+        path.write_text(json.dumps(ledger))
+        result = ITERATIONS.report(ITERATIONS.verify(path))["attempt_reports"][0]
+        self.assertEqual(result["paired_panel"]["points"]["p5"]["baseline_drift"], -0.5)
+        self.assertEqual(result["score_changes"]["p5"]["delta"], 0)
+
+    def test_scope_challenge_requires_bound_sponsor_feedback_and_inventory(self):
+        path, ledger = self.multi_gain_ledger()
+        def add_view(data):
+            data["intake"]["views"].append({"id": "missing-settings", "disposition": "in", "capture_refs": []})
+            snapshot = {"level": "component", "stage": "content",
+                        "view_dispositions": {"missing-settings": "in"}}
+            data["intake"]["scope"]["sponsor_confirmation"]["scope_snapshot"] = snapshot
+            data["sources"][0]["scope_snapshot"] = snapshot
+        self.rewrite_json_artifact(ledger, ledger["contract"]["brief_ref"], add_view)
+        ledger["stop"].update({"reason": "scope_challenge", "missing_scope": ["missing-settings"]})
+        path.write_text(json.dumps(ledger))
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "unknown artifact reference"):
+            ITERATIONS.verify(path)
+        feedback = self.artifact("scope-feedback.json", {
+            "quote": "Synthetic sponsor says settings was omitted.",
+            "actor": "synthetic-sponsor", "date": "2026-11-11",
+            "missing_scope": ["missing-settings"]})
+        ledger["stop"]["sponsor_feedback_ref"] = feedback
+        path.write_text(json.dumps(ledger))
+        self.assertEqual(ITERATIONS.report(ITERATIONS.verify(path))["stop"]["reason"], "scope_challenge")
+
+    def test_v2_goal_stop_uses_documented_selected_denominator(self):
+        path, ledger = self.create_v2_ledger()
+        for point in ledger["contract"]["points"]:
+            point["selected"] = point["id"] == "p1"
+        ledger["contract"]["version_history"][-1]["selected_point_ids"] = ["p1"]
+        ledger["stop"]["reason"] = "target_provisionally_met"
+        ledger["stop"]["final_review_status"] = "not_adoptable"
+        ledger["stop"]["final_review_ref"] = self.artifact("goal-review.json", {
+            "source_ref": "attempt-1/source.json", "scope_id": "scope-1",
+            "build_id": "redesign-build", "status": "not_adoptable",
+            "reviewer": {"kind": "independent_qualified_review", "id": "reviewer-1"},
+        })
+        path.write_text(json.dumps(ledger))
+        result = ITERATIONS.report(ITERATIONS.verify(path))
+        self.assertEqual(result["stop"]["reason"], "target_provisionally_met")
+
+    def test_new_scope_marker_cannot_silently_become_legacy(self):
+        path, ledger = self.create_v2_ledger()
+        ledger["contract"]["scope_contract_version"] = 1
+        path.write_text(json.dumps(ledger))
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "requires a sponsor-confirmed"):
+            ITERATIONS.verify(path)
+        path, ledger = self.create_ledger()
+        ledger["contract"]["scope_contract_version"] = 1
+        path.write_text(json.dumps(ledger))
+        with self.assertRaisesRegex(ITERATIONS.LedgerError, "marker is format-2 only"):
+            ITERATIONS.verify(path)
+
+    def test_paired_rule_rejects_small_regression_and_noise_band_gains(self):
+        for regression in (True, False):
+            with self.subTest(regression=regression):
+                path, ledger = self.multi_gain_ledger()
+                attempt = ledger["iterations"][0]
+                if regression:
+                    self.rewrite_json_artifact(ledger, attempt["paired_scores_ref"], lambda data:
+                        data["points"]["p5"].update({"candidate": [5, 6]}))
+                else:
+                    ledger["contract"]["keep_rule"]["noise_band"] = 1
+                    self.rewrite_json_artifact(ledger, attempt["proposal_ref"], lambda data:
+                        data.update(keep_rule=ledger["contract"]["keep_rule"]))
+                self.refresh_decision(ledger)
+                path.write_text(json.dumps(ledger))
+                with self.assertRaisesRegex(ITERATIONS.LedgerError,
+                                            "paired score regression|lacks meaningful gains"):
+                    ITERATIONS.verify(path)
+
     def test_visual_evidence_and_per_attempt_score_changes_are_reported(self):
         path, ledger = self.create_ledger()
         visual_ref = self.add_visual_evidence(ledger)
@@ -1207,6 +1372,13 @@ class IterationLedgerTest(unittest.TestCase):
                 record["attempt_summary"].update({
                     "visual_ref": visual_ref,
                     "visual_sha256": ledger["artifacts"][visual_ref]["sha256"],
+                })
+            if ledger["contract"].get("keep_rule"):
+                paired_ref = attempt["paired_scores_ref"]
+                record["attempt_summary"].update({
+                    "keep_rule": ledger["contract"]["keep_rule"],
+                    "paired_scores_ref": paired_ref,
+                    "paired_scores_sha256": ledger["artifacts"][paired_ref]["sha256"],
                 })
         encoded = (json.dumps(record, sort_keys=True) + "\n").encode()
         decision_path.write_bytes(encoded)

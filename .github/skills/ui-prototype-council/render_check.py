@@ -43,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -60,6 +61,36 @@ THEMES = {
 }
 CHECK_WIDTH, REFLOW_WIDTH, HEIGHT = 1280, 320, 900
 CAPTURE_WIDTHS = (1280, 1440, 320)
+
+# CSS Color Module Level 4 named colours (excludes transparent/currentcolor, which are
+# always allowed). Used so a page cannot smuggle a colour past the tokens gate just by
+# spelling it out as a keyword instead of a hex/functional literal.
+NAMED_COLORS_JS = (
+    "aliceblue,antiquewhite,aqua,aquamarine,azure,beige,bisque,black,blanchedalmond,blue,"
+    "blueviolet,brown,burlywood,cadetblue,chartreuse,chocolate,coral,cornflowerblue,cornsilk,"
+    "crimson,cyan,darkblue,darkcyan,darkgoldenrod,darkgray,darkgreen,darkgrey,darkkhaki,"
+    "darkmagenta,darkolivegreen,darkorange,darkorchid,darkred,darksalmon,darkseagreen,"
+    "darkslateblue,darkslategray,darkslategrey,darkturquoise,darkviolet,deeppink,deepskyblue,"
+    "dimgray,dimgrey,dodgerblue,firebrick,floralwhite,forestgreen,fuchsia,gainsboro,ghostwhite,"
+    "gold,goldenrod,gray,grey,green,greenyellow,honeydew,hotpink,indianred,indigo,ivory,khaki,"
+    "lavender,lavenderblush,lawngreen,lemonchiffon,lightblue,lightcoral,lightcyan,"
+    "lightgoldenrodyellow,lightgray,lightgreen,lightgrey,lightpink,lightsalmon,lightseagreen,"
+    "lightskyblue,lightslategray,lightslategrey,lightsteelblue,lightyellow,lime,limegreen,linen,"
+    "magenta,maroon,mediumaquamarine,mediumblue,mediumorchid,mediumpurple,mediumseagreen,"
+    "mediumslateblue,mediumspringgreen,mediumturquoise,mediumvioletred,midnightblue,mintcream,"
+    "mistyrose,moccasin,navajowhite,navy,oldlace,olive,olivedrab,orange,orangered,orchid,"
+    "palegoldenrod,palegreen,paleturquoise,palevioletred,papayawhip,peachpuff,peru,pink,plum,"
+    "powderblue,purple,rebeccapurple,red,rosybrown,royalblue,saddlebrown,salmon,sandybrown,"
+    "seagreen,seashell,sienna,silver,skyblue,slateblue,slategray,slategrey,snow,springgreen,"
+    "steelblue,tan,teal,thistle,tomato,turquoise,violet,wheat,white,whitesmoke,yellow,yellowgreen"
+)
+# CSS system colours: meaningful only where the user agent (or forced-colors mode) owns
+# the palette. Allowed solely inside a rule scoped under @media (forced-colors: active).
+SYSTEM_COLORS_JS = (
+    "accentcolor,accentcolortext,activetext,buttonborder,buttonface,buttontext,canvas,"
+    "canvastext,field,fieldtext,graytext,highlight,highlighttext,linktext,mark,marktext,"
+    "selecteditem,selecteditemtext,visitedtext,window,windowtext"
+)
 
 AUDIT = r"""
 (async (opts) => {
@@ -163,33 +194,76 @@ AUDIT = r"""
   }
 
   const literal = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color(?:-mix)?)\(/i;
+  const namedColors = new Set("__NAMED_COLORS__".split(","));
+  const systemColors = new Set("__SYSTEM_COLORS__".split(","));
+  const allowedColorKeywords = new Set(
+    ["currentcolor", "transparent", "inherit", "initial", "unset", "revert", "revert-layer"]);
+  const colorProps = new Set(["color", "background", "background-color", "border-color",
+    "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+    "outline-color", "text-decoration-color", "caret-color", "column-rule-color", "fill",
+    "stroke", "accent-color"]);
+  // A system colour (Highlight, Canvas, ...) is only meaningful where forced-colors mode
+  // owns the palette; everywhere else it is the same kind of hard-coded colour as a hex
+  // literal, so it is gated the same way unless the declaring rule is itself scoped under
+  // @media (forced-colors: active).
+  const hasBareColorKeyword = (value, forced) => {
+    for (const token of (value.toLowerCase().match(/[a-z-]+/g) || [])) {
+      if (allowedColorKeywords.has(token)) continue;
+      if (systemColors.has(token)) { if (!forced) return true; continue; }
+      if (namedColors.has(token)) return true;
+    }
+    return false;
+  };
+  const isColorLiteral = (prop, value, forced) =>
+    literal.test(value) || (colorProps.has(prop) && hasBareColorKeyword(value, forced));
+  // First pass: collect every custom-property NAME the generated tokens.css declares.
   const hover = [], focusSel = new Set();
-  const walk = (rules) => { for (const rule of rules) {
-    if (rule.cssRules && !rule.selectorText) { walk(rule.cssRules); continue; }
-    if (!rule.style) continue;
-    for (const prop of rule.style) {
-      if (prop.startsWith("--")) continue;
-      const v = rule.style.getPropertyValue(prop);
-      if (literal.test(v)) add("literal", null, `${rule.selectorText} { ${prop}: ${v} }`);
-    }
-    for (const sel of (rule.selectorText || "").split(",").map(s => s.trim())) {
-      if (sel.includes(":hover")) hover.push(sel);
-      if (sel.includes(":focus-visible") || sel.includes(":focus-within")) focusSel.add(sel);
-    }
-    if (rule.cssRules) walk(rule.cssRules);
-  }};
   for (const sheet of document.styleSheets) {
-    try { walk(sheet.cssRules); } catch (e) { add("literal", null, `stylesheet not auditable: ${sheet.href}`); }
+    // A custom property whose value is a colour literal is a colour decision; it must
+    // come from the generated tokens.css, not be re-declared (literally or by keyword,
+    // under any property name) in the page's own rules.
+    const fromTokens = /(^|\/)tokens\.css$/.test(sheet.href || "");
+    const walk = (rules, forced) => { for (const rule of rules) {
+      if (rule.cssRules && !rule.selectorText) {
+        const nested = forced ||
+          (typeof rule.conditionText === "string" && /forced-colors/i.test(rule.conditionText));
+        walk(rule.cssRules, nested);
+        continue;
+      }
+      if (!rule.style) continue;
+      for (const prop of rule.style) {
+        const v = rule.style.getPropertyValue(prop);
+        if (prop.startsWith("--")) {
+          if (!fromTokens && (literal.test(v) || hasBareColorKeyword(v, forced)))
+            add("literal", null, `${rule.selectorText || ":root"} { ${prop}: ${v} } declared outside tokens.css`);
+          continue;
+        }
+        if (isColorLiteral(prop, v, forced)) add("literal", null, `${rule.selectorText} { ${prop}: ${v} }`);
+      }
+      for (const sel of (rule.selectorText || "").split(",").map(s => s.trim())) {
+        if (sel.includes(":hover")) hover.push(sel);
+        if (sel.includes(":focus-visible") || sel.includes(":focus-within")) focusSel.add(sel);
+      }
+      if (rule.cssRules) walk(rule.cssRules, forced);
+    }};
+    try { walk(sheet.cssRules, false); } catch (e) { add("literal", null, `stylesheet not auditable: ${sheet.href}`); }
   }
   for (const entry of performance.getEntriesByType("resource")) {
     if (!entry.name.startsWith("file:") && !entry.name.startsWith("data:")) add("network", null, `external resource: ${entry.name}`);
   }
-  for (const el of document.querySelectorAll("link[href],script[src],img[src],iframe[src]")) {
+  for (const el of document.querySelectorAll("link[href],script[src],img[src],iframe[src],a[href]")) {
     const url = el.href || el.src;
     if (url && !url.startsWith("file:") && !url.startsWith("data:")) add("network", el, `external reference: ${url}`);
   }
   for (const el of document.querySelectorAll("[style]")) {
-    if (literal.test(el.getAttribute("style").replace(/--[\w-]+\s*:[^;]+;?/g, ""))) add("literal", el, "inline style colour");
+    for (const declaration of el.getAttribute("style").split(";")) {
+      const sep = declaration.indexOf(":");
+      if (sep < 0) continue;
+      const prop = declaration.slice(0, sep).trim().toLowerCase();
+      const value = declaration.slice(sep + 1).trim();
+      if (!prop || prop.startsWith("--") || !value) continue;
+      if (isColorLiteral(prop, value, false)) { add("literal", el, "inline style colour"); break; }
+    }
   }
   for (const sel of hover) {
     if (!opts.ignoreHoverOnly &&
@@ -219,7 +293,7 @@ AUDIT = r"""
   }
   return out;
 })
-"""
+""".replace("__NAMED_COLORS__", NAMED_COLORS_JS).replace("__SYSTEM_COLORS__", SYSTEM_COLORS_JS)
 
 QUALITY_AUDIT = r"""
 (async (opts) => {
@@ -277,30 +351,37 @@ QUALITY_AUDIT = r"""
     }
     if (!inspected) unknown.push("page has no elements to inspect for reduced-motion duration");
   }
+  // --font-size-* is the legacy hand-authored convention; --type-<name>-size is what
+  // design_tokens.py actually emits, in px, rem, or em. Both resolve against the rendered
+  // root font size (normally 16px) so a declared scale stays expressed in px.
+  const rootFontSizePx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
   const scales = [
-    ["typography_scale_px", "--font-size-", "font-size-token-scale"],
-    ["spacing_scale_px", "--space-", "spacing-token-scale"]
+    ["typography_scale_px", p => p.startsWith("--font-size-") || /^--type-.+-size$/.test(p),
+      "font-size-token-scale"],
+    ["spacing_scale_px", p => p.startsWith("--space-"), "spacing-token-scale"]
   ];
-  for (const [key, prefix, check] of scales) {
+  for (const [key, matches, check] of scales) {
     if (!opts[key]) continue;
     let count = 0;
     for (const sheet of document.styleSheets) {
       try {
         const walk = rules => { for (const rule of rules) {
           if (rule.style) for (const prop of rule.style) {
-            if (!prop.startsWith(prefix)) continue;
+            if (!matches(prop)) continue;
             count++;
-            const value = rule.style.getPropertyValue(prop).trim().match(/^(\d+(?:\.\d+)?)px$/);
-            if (!value || !opts[key].some(n => Math.abs(Number(value[1]) - n) < 0.01))
-              found.push({check, where: prop, detail:
-                `${rule.style.getPropertyValue(prop).trim()} is outside declared scale`});
+            const raw = rule.style.getPropertyValue(prop).trim();
+            const dimension = raw.match(/^(-?\d+(?:\.\d+)?)(px|rem|em)$/);
+            const px = dimension &&
+              (dimension[2] === "px" ? Number(dimension[1]) : Number(dimension[1]) * rootFontSizePx);
+            if (px == null || !opts[key].some(n => Math.abs(px - n) < 0.01))
+              found.push({check, where: prop, detail: `${raw} is outside declared scale`});
           }
           if (rule.cssRules) walk(rule.cssRules);
         }};
         walk(sheet.cssRules);
       } catch (_) { unknown.push(`${key}: a stylesheet is not inspectable`); }
     }
-    if (!count) unknown.push(`${key}: no ${prefix} custom properties were found`);
+    if (!count) unknown.push(`${key}: no matching custom properties were found`);
   }
   if (opts.spacing_scale_px) {
     const spacingProps = new Map([
@@ -524,12 +605,88 @@ class WebSocket:
                 return message.decode()
 
 
+FULL_PAGE_HEIGHT_LIMIT = 6000
+
+# Fetch does not intercept WebSocket upgrades. Refuse their network route through
+# port zero as well, with loopback proxy bypass disabled in Browser.__init__.
+NETWORK_OFFLINE_PROXY = "http=127.0.0.1:0;https=127.0.0.1:0;ws=127.0.0.1:0;wss=127.0.0.1:0"
+
+# Awaited after every navigation: web fonts settling plus two animation frames covers
+# layout/paint that finishes just after the load event. The opt-in half (an <html
+# data-ready> attribute, or an explicit ready_expression override) lets a page with its
+# own async rendering declare a signal instead of being measured at an arbitrary instant.
+READY_WAIT = r"""
+(async (expression) => {
+  if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) {} }
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  if (expression) return {declared: true, ready: !!(eval(expression))};
+  if (!document.documentElement.hasAttribute("data-ready")) return {declared: false, ready: true};
+  return {declared: true, ready: document.documentElement.getAttribute("data-ready") === "true"};
+})
+"""
+
+
+def setup_browser_guard(cdp, source_folder):
+    """Restrict `cdp` (a Browser) to file: reads inside source_folder and deny every
+    other network scheme except data:/blob:/about:blank. Fetch interception is enabled
+    once by Browser.__init__; this only (re)points the allowed folder, so it is cheap
+    to call before every navigation, including from round_prep for an explicit folder.
+    source_folder=None denies all file: access until a folder is set. This REPLACES
+    the allow-list with exactly source_folder -- the tight default for one page at a
+    time. Returns the resolved Path that was applied, or None.
+    For a page composed from more than one already-trusted folder (e.g. a contact
+    sheet built from several items' captures), call cdp.add_allowed_folder(folder)
+    once per source folder instead, which adds without clearing existing entries."""
+    return cdp.set_allowed_folder(source_folder)
+
+
+def wait_ready(cdp, ready_expression=None, timeout_seconds=2.0):
+    """Call once a page has fired its load event. Always awaits document.fonts.ready
+    plus two requestAnimationFrame callbacks. If the page opts in with <html
+    data-ready>, or ready_expression is given (a JS boolean expression evaluated in
+    the page), polls that signal until truthy or timeout_seconds elapses. Returns
+    {"declared", "ready", "timed_out", "elapsed_seconds"}; never raises -- callers
+    decide whether a timed-out signal is a reportable finding."""
+    started = time.monotonic()
+    expression_literal = json.dumps(ready_expression) if ready_expression else "null"
+    result = cdp.evaluate(f"{READY_WAIT}({expression_literal})")
+    while not result["ready"] and time.monotonic() - started < timeout_seconds:
+        time.sleep(0.05)
+        poll = ready_expression or "document.documentElement.getAttribute('data-ready') === 'true'"
+        result["ready"] = bool(cdp.evaluate(poll))
+    elapsed = time.monotonic() - started
+    return {"declared": result["declared"], "ready": result["ready"],
+            "timed_out": result["declared"] and not result["ready"], "elapsed_seconds": elapsed}
+
+
 class Browser:
     def __init__(self, chrome):
         self.profile = tempfile.mkdtemp(prefix="render-check-")
         self.process = subprocess.Popen(
-            [chrome, "--headless=new", "--remote-debugging-port=0", f"--user-data-dir={self.profile}",
-             "--allow-file-access-from-files", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--hide-scrollbars",
+            # --allow-file-access-from-files is restored: without it Chrome treats every
+            # file: URL as a unique opaque origin, breaking same-origin policy so badly
+            # that even a same-folder <link href="tokens.css"> stylesheet is not CSSOM-
+            # readable (confirmed: sheet.cssRules throws for a sibling file: stylesheet
+            # without this flag). That origin check is not the security boundary here
+            # regardless of its state: Fetch domain interception below pauses every
+            # request before it reaches the network stack or Chrome's own CORS/SOP
+            # layer, and denies anything outside the prototype folder. The flag only
+            # restores legitimate in-folder access.
+            #
+            # Fetch-domain interception (below) only sees HTTP-style requests; it does
+            # not see raw WebSocket upgrades, so a page opening `new WebSocket(...)` to
+            # an external or loopback origin would otherwise reach the network layer
+            # unseen. NETWORK_OFFLINE_PROXY routes every scheme (including ws/wss) to a
+            # closed local port, and --proxy-bypass-list=<-loopback> removes Chrome's
+            # default implicit bypass for 127.0.0.1/localhost, which would otherwise
+            # connect such destinations directly around the proxy. Confirmed with a
+            # real loopback TCP server: without this, a WebSocket handshake reaches the
+            # server; with it, the server receives zero connections and the socket
+            # errors out before any bytes are sent.
+            [chrome, "--allow-file-access-from-files",
+             f"--proxy-server={NETWORK_OFFLINE_PROXY}", "--proxy-bypass-list=<-loopback>",
+             "--headless=new", "--remote-debugging-port=0", f"--user-data-dir={self.profile}",
+             "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--hide-scrollbars",
              "--disable-background-networking", "--disable-component-update", "about:blank"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         port_file = Path(self.profile) / "DevToolsActivePort"
@@ -545,7 +702,16 @@ class Browser:
         page = next(t for t in targets if t["type"] == "page")
         self.ws = WebSocket(page["webSocketDebuggerUrl"])
         self.next_id = 0
+        self.allowed_folders = set()
+        self.blocked_requests = []
+        self.last_ready = None
         self.call("Page.enable")
+        self.call("Network.enable")
+        # Intercept every request before it reaches the network: file: URLs are allowed
+        # only inside the current prototype folder, every other scheme except data:,
+        # blob:, and about:blank is refused outright. This runs before navigation
+        # proceeds, not as after-the-fact evidence from the rendered page.
+        self.call("Fetch.enable", patterns=[{"urlPattern": "*"}])
 
     def _http(self, path):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=10) as reply:
@@ -562,11 +728,77 @@ class Browser:
                 if "error" in message:
                     raise CdpError(f"{method}: {message['error'].get('message')}")
                 result = message.get("result", {})
+            elif message.get("method") == "Fetch.requestPaused":
+                self._handle_fetch_paused(message["params"])
+            elif message.get("method") == "Network.webSocketCreated":
+                url = message["params"]["url"]
+                self.blocked_requests.append(url)
+                raise CdpError(f"blocked WebSocket request: {url}")
             elif message.get("method") == wait_event:
                 seen_event = True
         return result
 
+    def _request_allowed(self, url):
+        scheme = url.split(":", 1)[0].lower()
+        if scheme in ("data", "blob"):
+            return True
+        if scheme == "about":
+            return url == "about:blank"
+        if scheme != "file":
+            return False
+        if not self.allowed_folders:
+            return False
+        try:
+            path = Path(urllib.parse.unquote(urllib.parse.urlsplit(url).path)).resolve()
+        except (OSError, ValueError):
+            return False
+        for folder in self.allowed_folders:
+            try:
+                path.relative_to(folder)
+                return True
+            except ValueError:
+                continue
+        return False
+
+    def _handle_fetch_paused(self, params):
+        request_id, url = params["requestId"], params["request"]["url"]
+        allowed = self._request_allowed(url)
+        self.next_id += 1
+        ident = self.next_id
+        if allowed:
+            self.ws.send(json.dumps({"id": ident, "method": "Fetch.continueRequest",
+                                     "params": {"requestId": request_id}}))
+        else:
+            self.ws.send(json.dumps({"id": ident, "method": "Fetch.failRequest",
+                                     "params": {"requestId": request_id,
+                                                "errorReason": "BlockedByClient"}}))
+            self.blocked_requests.append(url)
+            raise CdpError(f"blocked request outside the prototype folder(s) or network: {url}")
+
+    def set_allowed_folder(self, source_folder):
+        """Replace the allow-list with exactly source_folder (a Path), or deny all
+        file: access if source_folder is None. This is the tight, single-folder
+        default used automatically by load() for ordinary per-page navigation.
+        Idempotent: Fetch/Page domains are already enabled by __init__; this only
+        updates which folder(s) are in scope."""
+        self.allowed_folders = {Path(source_folder).resolve()} if source_folder is not None else set()
+        return self.allowed_folders
+
+    def add_allowed_folder(self, folder):
+        """Add folder (a Path) to the allow-list without clearing existing entries.
+        For steps that compose files from more than one already-trusted folder into a
+        single file: navigation (e.g. a contact sheet built from several items'
+        captures) -- call this once per source folder before navigating to the
+        composed page, instead of using the single-folder set_allowed_folder/
+        setup_browser_guard, which would otherwise deny the other folders' assets."""
+        resolved = Path(folder).resolve()
+        self.allowed_folders.add(resolved)
+        return resolved
+
     def load(self, url, width, theme, forced, reduced_motion=False):
+        if url.startswith("file:"):
+            folder = Path(urllib.parse.unquote(urllib.parse.urlsplit(url).path)).resolve().parent
+            setup_browser_guard(self, folder)
         self.call("Emulation.setDeviceMetricsOverride", width=width, height=HEIGHT,
                   deviceScaleFactor=1, mobile=False)
         features = [{"name": n, "value": v} for n, v in THEMES[theme]]
@@ -575,6 +807,7 @@ class Browser:
             features.append({"name": "prefers-reduced-motion", "value": "reduce"})
         self.call("Emulation.setEmulatedMedia", features=features)
         self.call("Page.navigate", wait_event="Page.loadEventFired", url=url)
+        self.last_ready = wait_ready(self)
 
     def evaluate(self, expression):
         reply = self.call("Runtime.evaluate", expression=expression, awaitPromise=True,
@@ -585,12 +818,17 @@ class Browser:
 
     def screenshot(self, path, full_page=False):
         params = {"format": "png"}
+        truncated = False
         if full_page:
             size = self.call("Page.getLayoutMetrics")["cssContentSize"]
+            height = size["height"]
+            truncated = height > FULL_PAGE_HEIGHT_LIMIT
             params.update(captureBeyondViewport=True, clip={
-                "x": 0, "y": 0, "width": size["width"], "height": min(size["height"], 6000), "scale": 1})
+                "x": 0, "y": 0, "width": size["width"],
+                "height": min(height, FULL_PAGE_HEIGHT_LIMIT), "scale": 1})
         data = self.call("Page.captureScreenshot", **params)["data"]
         Path(path).write_bytes(base64.b64decode(data))
+        return {"truncated": truncated, "height": params.get("clip", {}).get("height")}
 
     def close(self):
         if getattr(self, "ws", None):
@@ -604,12 +842,25 @@ class Browser:
         shutil.rmtree(self.profile, ignore_errors=True)
 
 
+def _ready_finding(browser, config):
+    """A declared data-ready/ready_expression signal that never became true is a
+    defect worth reporting, not a result silently measured before the page settled."""
+    ready = browser.last_ready
+    if ready and ready.get("timed_out"):
+        return [{"check": "ready-timeout", "where": "page",
+                 "detail": f"declared ready signal did not become true within "
+                           f"{ready['elapsed_seconds']:.2f}s", "config": config}]
+    return []
+
+
 def check_page(browser, page, expect, forbid=(), budget=0):
     url = page.resolve().as_uri()
     found = []
     for theme in THEMES:
         for forced in (False, True):
             browser.load(url, CHECK_WIDTH, theme, forced)
+            config = f"{theme}{' forced' if forced else ''} {CHECK_WIDTH}"
+            found += _ready_finding(browser, config)
             # One Tab press puts the page in keyboard modality, so script focus then
             # matches :focus-visible as it would for a keyboard user.
             browser.call("Input.dispatchKeyEvent", type="keyDown", key="Tab", code="Tab",
@@ -621,9 +872,10 @@ def check_page(browser, page, expect, forbid=(), budget=0):
                                   "forbid": list(forbid),
                                   "budget": budget if (theme, forced) == ("light", False) else 0})
             for item in browser.evaluate(f"{AUDIT}({options})"):
-                item["config"] = f"{theme}{' forced' if forced else ''} {CHECK_WIDTH}"
+                item["config"] = config
                 found.append(item)
     browser.load(url, REFLOW_WIDTH, "light", False)
+    found += _ready_finding(browser, f"light {REFLOW_WIDTH}")
     for item in browser.evaluate(f"{AUDIT}({json.dumps({'mode': 'reflow'})})"):
         item["config"] = f"light {REFLOW_WIDTH}"
         found.append(item)
@@ -647,6 +899,8 @@ def check_page_profiles(browser, page, expect, forbid, budget, profiles):
         for theme in THEMES:
             for forced in (False, True):
                 browser.load(url, width, theme, forced)
+                config = f"{theme}{' forced' if forced else ''} {width}"
+                found.extend(_ready_finding(browser, config))
                 browser.call("Input.dispatchKeyEvent", type="keyDown", key="Tab", code="Tab",
                              windowsVirtualKeyCode=9)
                 browser.call("Input.dispatchKeyEvent", type="keyUp", key="Tab", code="Tab",
@@ -658,10 +912,11 @@ def check_page_profiles(browser, page, expect, forbid, budget, profiles):
                     "ignoreHoverOnly": True,
                 })
                 for item in browser.evaluate(f"{AUDIT}({options})"):
-                    item["config"] = f"{theme}{' forced' if forced else ''} {width}"
+                    item["config"] = config
                     found.append(item)
 
     browser.load(url, REFLOW_WIDTH, "light", False)
+    found.extend(_ready_finding(browser, "zoom/reflow (not phone) 320"))
     for item in browser.evaluate(f"{AUDIT}({json.dumps({'mode': 'reflow'})})"):
         item["config"] = "zoom/reflow (not phone) 320"
         found.append(item)
@@ -730,6 +985,7 @@ def check_page_profiles(browser, page, expect, forbid, budget, profiles):
 
 def capture_page(browser, page, folder):
     folder.mkdir(parents=True, exist_ok=True)
+    truncated = []
     for theme in THEMES:
         for forced in (False, True):
             for width in CAPTURE_WIDTHS:
@@ -737,12 +993,15 @@ def capture_page(browser, page, folder):
                     continue
                 browser.load(page.resolve().as_uri(), width, theme, forced)
                 name = f"{theme}{'-forced' if forced else ''}-{width}.png"
-                browser.screenshot(folder / name)
+                if browser.screenshot(folder / name)["truncated"]:
+                    truncated.append(name)
+    return truncated
 
 
 def capture_page_profiles(browser, page, folder, profiles):
     """Capture each unique target width and theme plus a separately labeled reflow view."""
     folder.mkdir(parents=True, exist_ok=True)
+    truncated = []
     by_width = {}
     for name, width in profiles["profiles"].items():
         by_width.setdefault(width, []).append(name)
@@ -750,12 +1009,47 @@ def capture_page_profiles(browser, page, folder, profiles):
         label = "-".join(names)
         for theme in THEMES:
             browser.load(page.resolve().as_uri(), width, theme, False)
-            browser.screenshot(folder / f"profile-{label}-{theme}-{width}.png")
+            name = f"profile-{label}-{theme}-{width}.png"
+            if browser.screenshot(folder / name)["truncated"]:
+                truncated.append(name)
     if CHECK_WIDTH not in by_width:
         browser.load(page.resolve().as_uri(), CHECK_WIDTH, "light", True)
-        browser.screenshot(folder / f"high-contrast-forced-{CHECK_WIDTH}.png")
+        name = f"high-contrast-forced-{CHECK_WIDTH}.png"
+        if browser.screenshot(folder / name)["truncated"]:
+            truncated.append(name)
     browser.load(page.resolve().as_uri(), profiles["reflow_width"], "light", False)
-    browser.screenshot(folder / f"reflow-zoom-{profiles['reflow_width']}.png")
+    name = f"reflow-zoom-{profiles['reflow_width']}.png"
+    if browser.screenshot(folder / name)["truncated"]:
+        truncated.append(name)
+    return truncated
+
+
+def folder_digest(folder):
+    """sha256 over every file's relative path and content under folder, sorted for a
+    stable result. This is the one shared whole-folder identity helper: round_prep.py's
+    hash_source_tree() calls this directly so a round's source_tree_sha256 and a
+    render_check --report's source_tree_sha256 for the same folder are byte-identical.
+    Public and stable -- do not change the digest construction without updating both
+    callers' expectations."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(folder).as_posix().encode())
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
+
+
+def _tier2_report(problems, unknown):
+    """render_check runs only rendered checks -- there is no static/markup tier here,
+    so --report emits a single tier2 entry covering every finding it produced (contrast,
+    target-size, reflow, focus, literal, hover-only, text, network, forbid, budget,
+    clicks, modal, ready-timeout, semantic-control-parity, reduced-motion-duration,
+    typography-scale, font-size-token-scale, spacing-scale, spacing-token-scale,
+    text-expansion-clipping, screenshot-truncated -- all of it). Status is fail if any
+    problem was found, incomplete if a quality check could not be evaluated, else pass.
+    A project_static_check report (markup/ARIA, tier1) is produced by a different tool;
+    this report never emits a tier1 entry."""
+    status = "fail" if problems else "incomplete" if unknown else "pass"
+    return {"findings": problems, "status": status}
 
 
 def main(argv=None):
@@ -770,6 +1064,8 @@ def main(argv=None):
                         help="shared JSON rubric with bounded web target profiles and optional quality checks")
     parser.add_argument("--max-words", type=int, default=0,
                         help="visible-word budget for the first 1280 by 900 viewport; 0 disables it")
+    parser.add_argument("--report", type=Path,
+                        help="write a typed JSON report (schema_version 1) alongside the printed output")
     parser.add_argument("--chrome", default=os.environ.get("CHROME", DEFAULT_CHROME))
     args = parser.parse_args(argv)
     try:
@@ -792,6 +1088,7 @@ def main(argv=None):
     browser = Browser(args.chrome)
     failed = False
     incomplete = False
+    report_pages = []
     try:
         print(f"render-check: {browser.version}")
         if profiles:
@@ -817,21 +1114,48 @@ def main(argv=None):
                     for name, clicks, budget in counts:
                         suffix = f" [{width}px]" if profiles else ""
                         print(f"{page}: clicks: {name}: {clicks} (budget {budget}){suffix}")
+            if args.capture:
+                target = args.capture / page.parent.name
+                if profiles:
+                    truncated = capture_page_profiles(browser, page, target, profiles)
+                else:
+                    truncated = capture_page(browser, page, target)
+                for name in truncated:
+                    problems.append({
+                        "check": "screenshot-truncated", "where": name,
+                        "detail": f"capture height clamped to {FULL_PAGE_HEIGHT_LIMIT}px; "
+                                  "content beyond this line was not captured",
+                        "config": "capture"})
             for item in problems:
                 print(f"{page}: {item['check']}: {item['where']}: {item['detail']} [{item['config']}]")
             status = "FAIL" if problems else "INCOMPLETE" if unknown else "ok"
             print(f"{page}: {status} ({len(problems)} finding(s))")
             failed = failed or bool(problems)
-            if args.capture:
-                if profiles:
-                    capture_page_profiles(browser, page, args.capture / page.parent.name, profiles)
-                else:
-                    capture_page(browser, page, args.capture / page.parent.name)
+            if args.report:
+                report_pages.append({
+                    "page": str(page),
+                    "source_sha256": hashlib.sha256(page.read_bytes()).hexdigest(),
+                    "source_tree_sha256": folder_digest(page.parent),
+                    "tier2": _tier2_report(problems, unknown),
+                })
     except CdpError as error:
         print(f"render-check: {error}", file=sys.stderr)
         return 2
     finally:
         browser.close()
+    if args.report:
+        # rubric_sha256 binds this report to the exact rubric (target profiles, quality
+        # checks) that produced it: a round rubric declares its own digest, and without
+        # this field a render_check run made WITHOUT --rubric could be substituted for
+        # one scoped to a round's rubric and silently report "pass" while never having
+        # evaluated that rubric's quality checks at all. null means no --rubric was
+        # given (unscoped run). One rubric applies to the whole invocation, not per
+        # page, so this is a top-level field.
+        args.report.write_text(json.dumps({
+            "schema_version": 1, "kind": "render_check",
+            "rubric_sha256": profiles["digest"] if profiles else None,
+            "pages": report_pages,
+        }, indent=2) + "\n", encoding="utf-8")
     print(f"render-check: {time.monotonic() - started:.2f}s")
     return 1 if failed else 3 if incomplete else 0
 

@@ -7,11 +7,26 @@
       "fraction": 0.8
     },
     "points": [
-      {"id": "hierarchy", "selected": true},
-      {"id": "job_completion", "selected": true},
-      {"id": "truthful_state", "selected": true},
-      {"id": "layout", "selected": true},
-      {"id": "accessibility", "selected": true}
+      {
+        "id": "hierarchy",
+        "selected": true
+      },
+      {
+        "id": "job_completion",
+        "selected": true
+      },
+      {
+        "id": "truthful_state",
+        "selected": true
+      },
+      {
+        "id": "layout",
+        "selected": true
+      },
+      {
+        "id": "accessibility",
+        "selected": true
+      }
     ],
     "feasibility": {
       "status": "unknown",
@@ -62,11 +77,11 @@
   "artifacts": {
     "baseline-source": {
       "path": "baseline-source.json",
-      "sha256": "6c67812f139c681fa48d26eafc13985be0bbd3cff49269f5df8ad690ff636be1"
+      "sha256": "a849798f14148291248e0f5ee2874b9d47d6a37f9b02d213239bced76548a596"
     },
     "redesign-source": {
       "path": "redesign-source.json",
-      "sha256": "f39c09d220f3f7af3f0b2a9467f3b170a9b665c4348bbeceaeff2c8529bea441"
+      "sha256": "328572899e814b3edb0b95a3d4749424941235d94fecf583449fcdd554917927"
     },
     "baseline-checks": {
       "path": "baseline-checks.json",
@@ -90,7 +105,7 @@
     },
     "attempt-1-decision": {
       "path": "attempt-1-decision.json",
-      "sha256": "d58080ffa2649a08829d7c1146ed6433a5e8ef0f5c4598fbcf21d28a67d71142"
+      "sha256": "27f0313cc0741c3af265e2f207307ff4a79254e9e5beefd85af319c63bda2c86"
     }
   },
   "baseline": {
@@ -106,7 +121,10 @@
       "proposal_ref": "attempt-1-proposal",
       "decision_ref": "attempt-1-decision",
       "hypothesis": "A coherent navigation and content redesign will improve hierarchy and task completion.",
-      "dimensions": ["hierarchy", "job_completion"],
+      "dimensions": [
+        "hierarchy",
+        "job_completion"
+      ],
       "expected_gain": {
         "hierarchy": 1,
         "job_completion": 1

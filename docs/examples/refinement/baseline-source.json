@@ -4,7 +4,7 @@
   "files": {
     "page": {
       "path": "alternatives/baseline/index.html",
-      "sha256": "ab30d0fb45b7d71b4e6873657e09fed34140aab14c23385308c2a2c48255183e"
+      "sha256": "6e1106bab49fb62379db84d6e77855a9dc842c8758da9e3711139c155d1a178a"
     },
     "rubric": {
       "path": "rubric.json",
@@ -17,6 +17,10 @@
     "task-fixture": {
       "path": "tasks.json",
       "sha256": "26bdab10b9b8196cf1862661c45f0dffe782198601b4d14a0887feaa33e5a9c7"
+    },
+    "tokens": {
+      "path": "alternatives/baseline/tokens.css",
+      "sha256": "769e0543b813e25215ccbc221b1cd80d0aef74eeb4f312da92577ac2dc988b34"
     }
   }
 }

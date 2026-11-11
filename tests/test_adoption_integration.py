@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from test_render_check import CHROME, GOOD
+from test_render_check import CHROME, GOOD, TOKENS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +52,7 @@ class CapturedAdoptionTest(unittest.TestCase):
                 folder = root / name
                 folder.mkdir()
                 (folder / "index.html").write_text(GOOD)
+                (folder / "tokens.css").write_text(TOKENS)
                 (folder / "DESIGN.md").write_text("Owned synthetic fixture design.")
                 items.append(f"{name}={folder}")
 
@@ -62,13 +63,14 @@ class CapturedAdoptionTest(unittest.TestCase):
                 )
 
             rendered = invoke("render_check.py", root / "candidate/index.html",
-                              "--rubric", rubric_path, "--chrome", CHROME)
+                              "--rubric", rubric_path, "--chrome", CHROME,
+                              "--report", run / "render-report.json")
             self.assertEqual(rendered.returncode, 0, rendered.stdout + rendered.stderr)
             prepared = invoke(
                 "round_prep.py", "prepare", "--run", run, "--round", 1, "--blind", blind,
                 "--seed", 7, "--model", "synthetic-vector", "--strong", "strong",
                 "--weak", "weak", "--keep", 2, "--reviewers", 2,
-                "--rubric", rubric_path, "--chrome", CHROME, *items,
+                "--rubric", rubric_path, "--chrome", CHROME, "--legacy-unscoped", *items,
             )
             self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
             revealed = invoke("round_prep.py", "reveal", "--run", run, "--round", 1, "--blind", blind)
@@ -76,8 +78,7 @@ class CapturedAdoptionTest(unittest.TestCase):
             round_dir = run / "round-1"
             meta_path = round_dir / "round.json"
             meta = json.loads(meta_path.read_text())
-            for index in range(2):
-                order = meta["items"][index:] + meta["items"][:index]
+            for index, (reviewer, order) in enumerate(meta["reviewer_orders"].items()):
                 scores = {}
                 for ident, name in meta["reveal"].items():
                     value = {"candidate": 8, "weak": 2, "strong": 9}[name]
@@ -89,12 +90,11 @@ class CapturedAdoptionTest(unittest.TestCase):
                         } for dim in rubric["dimensions"]
                     }
                 sheet = {
-                    "reviewer": f"r{index}", "reviewer_kind": "model", "model": "synthetic-vector",
+                    "reviewer": reviewer, "reviewer_kind": "model", "model": "synthetic-vector",
                     "seed": index, "order": order, "scores": scores,
                 }
-                (round_dir / f"reviewer-r{index}.json").write_text(json.dumps(sheet))
-            log = round_dir / "render-report.txt"
-            log.write_text(rendered.stdout + rendered.stderr)
+                (round_dir / f"reviewer-{reviewer}.json").write_text(json.dumps(sheet))
+            log = run / "render-report.json"
             meta["evidence_manifest"]["render-report"] = {
                 "path": str(log), "sha256": hashlib.sha256(log.read_bytes()).hexdigest(),
             }
@@ -110,6 +110,7 @@ class CapturedAdoptionTest(unittest.TestCase):
             report = (round_dir / "report.md").read_text()
             self.assertIn("77.78 | NOT_ADOPTABLE", report)
             self.assertIn("tier1 evidence is failed or unverified", report)
+            self.assertNotIn("tier2 evidence", report)
             strict = invoke("council.py", "--verify", run, "--require-adoptable")
             self.assertEqual(strict.returncode, 1)
 

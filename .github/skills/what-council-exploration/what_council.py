@@ -2,10 +2,15 @@
 """Validate a local what-council handoff and its concept comparison inputs."""
 
 import argparse
+import importlib.util
 import json
 import sys
 from pathlib import Path
 
+SPEC = importlib.util.spec_from_file_location(
+    "scope_intake", Path(__file__).resolve().parents[1] / "ui-prototype-council/intake.py")
+INTAKE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(INTAKE)
 
 CONFIDENCE = {"low", "medium", "high", "unknown"}
 ROLES = {"advisor", "adversary", "judge"}
@@ -31,7 +36,7 @@ def _finding(code, severity, message, **details):
     return {"code": code, "severity": severity, "message": message, **details}
 
 
-def validate(brief, exploration):
+def validate(brief, exploration, *, root=None, brief_path=None):
     """Return a reviewable report; never infer that the handoff is accepted."""
     if not isinstance(brief, dict) or not isinstance(exploration, dict):
         raise HandoffError("brief and exploration must be JSON objects")
@@ -45,8 +50,21 @@ def validate(brief, exploration):
 
     if not isinstance(brief.get("brief_version"), str) or not brief["brief_version"].strip():
         problem("missing_brief_version", "The canonical format-2 project brief must have a version.")
-    if exploration.get("format_version") != 1:
-        problem("unsupported_exploration_version", "Exploration metadata must use format_version 1.")
+    version = exploration.get("format_version")
+    if type(version) is not int or version not in {1, 2}:
+        problem("unsupported_exploration_version", "Exploration metadata must use format_version 1 or 2.")
+    scoped = version == 2
+    scope_report = None
+    if scoped:
+        rows = exploration.get("directions", [])
+        scope_report = INTAKE.validate(
+            brief, root=root, current_brief_path=brief_path,
+            directions=[row for row in rows if isinstance(row, dict)
+                        and row.get("eligible") is True] if isinstance(rows, list) else [])
+        findings.extend(scope_report["findings"])
+    else:
+        note("legacy_exploration_not_selection_ready",
+             "Legacy exploration is read-only and unscoped; reconfirm intake for a new format-2 run.")
     if exploration.get("brief_version") != brief.get("brief_version"):
         problem("brief_version_mismatch", "Exploration and canonical brief versions differ.")
     if brief.get("status") not in {"complete", "incomplete"}:
@@ -84,10 +102,18 @@ def validate(brief, exploration):
         if not isinstance(decision, dict):
             problem("invalid_authority", "Each decision must be an object.")
             continue
+        if scoped and not INTAKE.member(decision.get("topic"), {"scope", "primary_job", "quality", "how", "other"}):
+            problem("invalid_authority_topic", "Scoped decisions need an explicit topic.")
+        if (not INTAKE.member(decision.get("owner"), {"sponsor", "agent"})
+                or not INTAKE.member(decision.get("status"), {"approved", "proposed", "unknown"})):
+            problem("invalid_authority_enum", "Decision owner/status must use the declared enums.")
+        if INTAKE.member(decision.get("topic"), {"scope", "primary_job"}) and decision.get("owner") != "sponsor":
+            problem("judge_exceeded_authority", "Scope and primary-job decisions cannot be agent delegated.")
         if decision.get("owner") == "sponsor" and decision.get("status") == "approved":
             ref = decision.get("approval_source_ref")
-            source = source_map.get(ref)
-            if not source or source.get("kind") != "sponsor_approval":
+            source = source_map.get(ref) if INTAKE.text(ref) else None
+            if (not source or source.get("kind") != "sponsor_approval"
+                    or scoped and not INTAKE.sponsor_approved(brief, decision.get("id"))):
                 problem(
                     "unsupported_sponsor_approval",
                     f"Sponsor decision {decision.get('id')!r} is marked approved without a cited sponsor-approval source.",
@@ -250,7 +276,9 @@ def validate(brief, exploration):
         if not isinstance(objection, dict) or not isinstance(objection.get("id"), str):
             problem("invalid_objection", "Each objection needs a stable id.")
             continue
-        if objection.get("raised_by") not in ROLES:
+        if scoped and not INTAKE.member(objection.get("topic"), {"scope", "primary_job", "quality", "how", "other"}):
+            problem("invalid_objection_topic", "Scoped objections need an explicit topic.")
+        if not INTAKE.member(objection.get("raised_by"), ROLES):
             problem(
                 "invalid_objection_role",
                 f"Objection {objection['id']!r} must identify the advisor, adversary or judge who raised it.",
@@ -267,7 +295,8 @@ def validate(brief, exploration):
         elif ruling.get("status") not in {"resolved", "deferred_noncritical"}:
             problem("invalid_ruling", f"Objection {objection['id']!r} has no valid disposition.")
         if ruling and ruling.get("decision_status") == "approved":
-            decision = decisions.get(ruling.get("decision_id"))
+            decision_ref = ruling.get("decision_id")
+            decision = decisions.get(decision_ref) if INTAKE.text(decision_ref) else None
             if ruling.get("judge_role") == "judge" and (
                 ruling.get("decision_owner") == "sponsor"
                 or (decision and decision.get("owner") == "sponsor")
@@ -277,15 +306,40 @@ def validate(brief, exploration):
                     f"The judge cannot approve sponsor-owned decision {ruling.get('decision_id')!r}.",
                     objection_id=objection.get("id"),
                 )
-            elif ruling.get("decision_owner") == "sponsor":
-                approval_ref = ruling.get("approval_source_ref")
-                source = source_map.get(approval_ref)
-                if not source or source.get("kind") != "sponsor_approval":
-                    problem(
-                        "unsupported_sponsor_approval",
-                        f"Ruling on sponsor decision {ruling.get('decision_id')!r} lacks an approval source.",
-                        objection_id=objection.get("id"),
-                    )
+        if scoped and ruling:
+            if (ruling.get("decision_owner") is not None
+                    and not INTAKE.member(ruling["decision_owner"], {"sponsor", "agent"})):
+                problem("invalid_authority_enum", "Ruling decision_owner must be sponsor or agent.")
+            scope_intake = brief.get("intake")
+            scope_intake = scope_intake if isinstance(scope_intake, dict) else {}
+            view_rows = scope_intake.get("views")
+            view_rows = view_rows if isinstance(view_rows, list) else []
+            protected_ids = {row["id"] for row in view_rows
+                             if isinstance(row, dict) and INTAKE.text(row.get("id"))}
+            keep = scope_intake.get("keep")
+            keep = keep if isinstance(keep, dict) else {}
+            keep_rows = keep.get("items")
+            keep_rows = keep_rows if isinstance(keep_rows, list) else []
+            protected_ids.update(row["id"] for row in keep_rows
+                                 if isinstance(row, dict) and INTAKE.text(row.get("id")))
+            if (INTAKE.member(objection.get("topic"), {"scope", "primary_job"})
+                    or INTAKE.member(objection.get("item_id"), protected_ids)
+                    or ruling.get("narrows_scope") is True or ruling.get("deferred_views")):
+                if (ruling.get("status") != "resolved"
+                        or ruling.get("narrows_scope") is True or ruling.get("deferred_views")):
+                    subject = objection.get("item_id")
+                    subjects = [subject] if INTAKE.text(subject) else []
+                    deferred = ruling.get("deferred_views", [])
+                    if (not isinstance(deferred, list)
+                            or any(not INTAKE.member(key, protected_ids) for key in deferred)):
+                        problem("invalid_scope_deferral", "Deferred views must name declared scope items.")
+                        deferred = []
+                    subjects.extend(deferred)
+                    if not subjects or any(not INTAKE.sponsor_approved(
+                            brief, ruling.get("sponsor_decision_ref"), subject_id=key)
+                            for key in subjects):
+                        problem("judge_exceeded_authority",
+                                "The judge cannot defer or narrow scope/primary jobs without a sponsor reference.")
 
     revisions = exploration.get("input_revisions")
     if not isinstance(revisions, dict):
@@ -479,6 +533,8 @@ def validate(brief, exploration):
     blockers = [item for item in findings if item["severity"] == "blocker"]
     if blockers or unresolved_critical:
         status = "blocked"
+    elif not scoped:
+        status = "legacy_unscoped"
     elif not brief_complete or critical_unknowns:
         status = "exploratory"
         note(
@@ -489,13 +545,16 @@ def validate(brief, exploration):
         status = "ready_for_selection"
 
     return {
-        "format_version": 1,
+        "format_version": version,
+        "scope_header": scope_report["scope_header"] if scope_report else "Scope: undeclared (legacy)",
+        "coverage": scope_report["coverage"] if scope_report else None,
+        "direction_coverage": scope_report["directions"] if scope_report else {},
         "brief_version": brief.get("brief_version"),
         "canonical_brief_ref": refinement.get("canonical_brief_ref"),
         "handoff_status": status,
         "acceptance_claim": False,
-        "prototype_selection_ready": status != "blocked",
-        "refinement_handoff_permitted_after_selection": status != "blocked",
+        "prototype_selection_ready": scoped and status != "blocked",
+        "refinement_handoff_permitted_after_selection": scoped and status != "blocked",
         "complete_what_handoff": status == "ready_for_selection",
         "sources": sources,
         "what_items": what_items,
@@ -524,8 +583,13 @@ def validate(brief, exploration):
     }
 
 
-def refinement_route(exploration, selected_direction):
+def refinement_route(exploration, selected_direction, brief=None, *, root=None, brief_path=None):
     """Describe the existing format-2 refinement handoff after council selection."""
+    if brief is None:
+        raise HandoffError("refinement routing requires the canonical scoped brief")
+    report = validate(brief, exploration, root=root, brief_path=brief_path)
+    if not report["refinement_handoff_permitted_after_selection"]:
+        raise HandoffError("blocked or legacy exploration cannot route to refinement")
     direction = next(
         (item for item in exploration.get("directions", [])
          if isinstance(item, dict) and item.get("id") == selected_direction
@@ -540,16 +604,22 @@ def refinement_route(exploration, selected_direction):
     return {
         "skill": "ui-prototype-council",
         "format_version": 2,
+        "scope_contract_version": 1,
         "canonical_brief_ref": refinement["canonical_brief_ref"],
         "selected_candidate": selected_direction,
+        "scope_header": report["scope_header"],
+        "coverage": report["direction_coverage"].get(selected_direction),
         "selection_authority": "existing prototype-selection result; not inferred by this validator",
     }
 
 
-def preflight(action, approval_ref=None, data_class="synthetic"):
+def preflight(action, approval_ref=None, data_class=None):
     """Check declared authorization only; this command never performs the action."""
     if action not in {"provider-call", "data-sharing", "publication"}:
         raise HandoffError(f"unsupported external action {action!r}")
+    if data_class not in INTAKE.DATA_CLASSES:
+        return {"status": "denied", "action": action, "data_class": data_class,
+                "reason": "An explicit known data_class is required.", "action_executed": False}
     if not approval_ref:
         return {
             "status": "denied",
@@ -578,14 +648,15 @@ def main(argv=None):
     gate = commands.add_parser("preflight", help="check an external action's explicit authorization")
     gate.add_argument("--action", choices=("provider-call", "data-sharing", "publication"), required=True)
     gate.add_argument("--approval-ref")
-    gate.add_argument("--data-class", default="synthetic")
+    gate.add_argument("--data-class", choices=sorted(INTAKE.DATA_CLASSES))
     args = parser.parse_args(argv)
     try:
         if args.command == "preflight":
             report = preflight(args.action, args.approval_ref, args.data_class)
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0 if report["status"] == "preflight-passed" else 2
-        report = validate(_read_json(args.brief, "brief"), _read_json(args.exploration, "exploration"))
+        report = validate(_read_json(args.brief, "brief"), _read_json(args.exploration, "exploration"),
+                          root=args.brief.parent, brief_path=args.brief)
         encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
         if args.report:
             args.report.write_text(encoded, encoding="utf-8")

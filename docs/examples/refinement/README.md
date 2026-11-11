@@ -19,6 +19,13 @@ and exercise incomplete briefs, overlapping scopes, task journeys, freshness,
 decision authority, incompatible mappings and budget stops. No upload or model
 call is required.
 
+On 2026-11-11, these maintained synthetic fixtures were re-tokenised with sibling
+`tokens.css` files. Computed styles, element geometry and text were unchanged in
+96 before/after checks covering the existing themes, widths, forced colours and
+error state. Source and dependent artifact hashes were regenerated bottom-up;
+the old hashes are superseded. The format-1 scores, decisions and report meaning
+are unchanged. These fixtures are not historical evidence.
+
 Run the same deterministic checks on both pages from the repository root:
 
 ```sh

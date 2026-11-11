@@ -6,6 +6,23 @@ The canonical WHAT is the format-2 project intake; `exploration.json`
 references its version and carries only comparison-specific directions and
 input revisions.
 
+The exploration is format 2; its canonical brief contains version-1 scope
+intake. This fictional page example includes a sponsor quote/decision, current
+capture references, KEEP evidence and per-direction coverage/dispositions.
+Capture references are declarations, not actual screenshots or usability proof.
+The component path omits views/journeys/domain artifacts and uses
+`keep: {"none_reason": "No existing behavior is being replaced."}` when applicable;
+it still requires sponsor confirmation and a component quality target.
+Product scope requires all inventory captures, two cross-view journeys,
+artifact paths/data classes or a none reason, and all three quality targets.
+The shared validator never opens domain artifact paths.
+
+For selection, extract eligible direction records to a JSON list, name them
+exactly as the `round_prep.py prepare NAME=FOLDER` candidates, then pass
+`--brief project-intake-v2.json --directions directions.json`. These files
+become hash-bound scope evidence. Existing unscoped runs remain explicitly
+legacy. A below-product result is never a new product interface.
+
 The advisor, adversary and judge are represented as separate illustrative
 roles. The example flags an unsourced layout prescription and reclassifies
 it as an optional direction; it separately permits a sourced, authorized

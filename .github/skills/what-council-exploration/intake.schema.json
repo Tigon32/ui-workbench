@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tigon32:ui-workbench:scope-intake:v1",
+  "title": "Project-owned scope intake inside the canonical brief",
+  "type": "object",
+  "required": ["version", "scope", "keep", "quality_targets"],
+  "properties": {
+    "version": {"const": 1},
+    "claim_level": {"enum": ["component", "page", "flow", "product"]},
+    "scope": {
+      "type": "object",
+      "required": ["level", "decision_id", "sponsor_confirmation"],
+      "properties": {
+        "level": {"enum": ["component", "page", "flow", "product"]},
+        "stage": {"enum": ["shell", "content"]},
+        "decision_id": {"type": "string", "minLength": 1},
+        "sponsor_confirmation": {
+          "type": "object",
+          "required": ["quote", "date", "actor", "source_ref", "scope_snapshot"],
+          "properties": {
+            "quote": {"type": "string", "minLength": 1},
+            "date": {"type": "string", "format": "date"},
+            "actor": {"type": "string", "minLength": 1},
+            "source_ref": {"type": "string", "minLength": 1},
+            "scope_snapshot": {
+              "type": "object",
+              "required": ["level", "stage", "view_dispositions"],
+              "properties": {
+                "level": {"enum": ["component", "page", "flow", "product"]},
+                "stage": {"enum": ["shell", "content"]},
+                "view_dispositions": {"type": "object", "additionalProperties": {"enum": ["in", "context", "out"]}}
+              }
+            },
+            "reconfirms": {"type": "array", "items": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+          }
+        }
+      }
+    },
+    "views": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "disposition"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "disposition": {"enum": ["in", "context", "out"]},
+          "reason": {"type": "string", "minLength": 1},
+          "capture_refs": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        }
+      }
+    },
+    "keep": {
+      "type": "object",
+      "oneOf": [
+        {"required": ["items"], "not": {"required": ["none_reason"]}},
+        {"required": ["none_reason"], "not": {"required": ["items"]}}
+      ],
+      "properties": {
+        "none_reason": {"type": "string", "minLength": 1},
+        "items": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "what", "reason", "evidence_ref"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "kind": {"enum": ["keep", "change", "drop"]},
+              "what": {"type": "string", "minLength": 1},
+              "reason": {"type": "string", "minLength": 1},
+              "evidence_ref": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["path", "data_class"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "kind": {"type": "string"},
+          "data_class": {"enum": ["synthetic", "public", "private", "confidential"]}
+        }
+      }
+    },
+    "no_artifacts_reason": {"type": "string", "minLength": 1},
+    "journeys": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["id", "view_ids"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "view_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+        }
+      }
+    },
+    "quality_targets": {
+      "type": "object", "required": ["component"],
+      "properties": {
+        "component": {"type": "string", "minLength": 1},
+        "page": {"type": "string", "minLength": 1},
+        "product": {"type": "string", "minLength": 1}
+      }
+    },
+    "prior_briefs": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["id", "path", "sha256", "round", "purpose", "date", "confirmation_ref"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "path": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "round": {"type": ["integer", "string"]},
+          "purpose": {"type": "string", "minLength": 1},
+          "date": {"type": "string", "format": "date"},
+          "confirmation_ref": {"type": "string"}
+        }
+      }
+    },
+    "prior_briefs_none_reason": {"type": "string", "minLength": 1},
+    "delivery_context": {
+      "type": "object",
+      "properties": {
+        "stack": {"type": "string"},
+        "existing_components": {"type": "array", "items": {"type": "string"}},
+        "approved_libraries": {"type": "array", "items": {"type": "string"}},
+        "token_source": {"type": "string"},
+        "motion_policy": {"type": "string"},
+        "custom_component_rationale": {"type": "string"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"scope": {"properties": {"level": {"enum": ["page", "flow", "product"]}}}}},
+      "then": {"required": ["views", "journeys", "artifacts"], "properties": {"views": {"minItems": 1}, "quality_targets": {"required": ["page"]}}}
+    },
+    {
+      "if": {"properties": {"scope": {"properties": {"level": {"const": "product"}}}}},
+      "then": {"properties": {"journeys": {"minItems": 2}, "quality_targets": {"required": ["product"]}}}
+    }
+  ]
+}

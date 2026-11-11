@@ -28,6 +28,10 @@ from pathlib import Path
 MIN_REASON = 20
 MIN_VALID_REVIEWERS = 2
 
+SPEC = importlib.util.spec_from_file_location("scope_intake", Path(__file__).with_name("intake.py"))
+INTAKE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(INTAKE)
+
 
 class RunError(Exception):
     pass
@@ -191,6 +195,13 @@ def check_evidence(meta, items, round_dir):
     if (not isinstance(sources, dict) or set(sources) != set(items)
             or any(not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{64}", v) for v in sources.values())):
         raise RunError(f"{round_dir}: source_sha256 must identify every item")
+    # source_tree_sha256 is additive: legacy rounds without it keep exactly the
+    # source_sha256 (entry-page-only) identity semantics above.
+    tree = meta.get("source_tree_sha256")
+    if tree is not None and (
+            not isinstance(tree, dict) or set(tree) != set(items)
+            or any(not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{64}", v) for v in tree.values())):
+        raise RunError(f"{round_dir}: source_tree_sha256 must identify every item when present")
     for ref, artifact in manifest.items():
         if (not isinstance(ref, str) or not ref or not isinstance(artifact, dict)
                 or not isinstance(artifact.get("path"), str)
@@ -221,7 +232,115 @@ def check_profile_evidence(meta, round_dir):
         raise RunError(f"{round_dir}: target profile evidence is missing or differs from the rubric")
 
 
-def adoption_report(rubric, dims, contestants, valid, stats, meta):
+def _render_check_report(path):
+    """Load path as a render_check --report JSON document, or return None if it
+    isn't one (e.g. a screenshot reference) so callers can reject it as proof."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or data.get("schema_version") != 1 or data.get("kind") != "render_check":
+        return None
+    return data
+
+
+def _static_check_report(path):
+    """Load path as a project_static_check tier1 report, or return None if it isn't
+    one (e.g. a render_check report, used for the wrong tier)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if (not isinstance(data, dict) or data.get("schema_version") != 1
+            or data.get("kind") != "project_static_check"):
+        return None
+    return data
+
+
+def _render_check_tier2_reason(path, source, tree, rubric):
+    """Require a source- and rubric-bound rendered check, never a static pass."""
+    report = _render_check_report(path)
+    if report is None:
+        return "evidence must be a typed render_check report, not a screenshot reference or wrong report kind"
+    pages = report.get("pages")
+    page = next((p for p in pages if isinstance(p, dict) and p.get("source_sha256") == source), None) \
+        if isinstance(pages, list) else None
+    if page is None:
+        return "evidence report does not match this item's source_sha256"
+    if tree is not None and page.get("source_tree_sha256") != tree:
+        return "evidence report does not match this item's source_tree_sha256"
+    if rubric is not None and report.get("rubric_sha256") != rubric:
+        return "evidence report does not match this round's rubric_sha256"
+    block = page.get("tier2")
+    if not isinstance(block, dict) or block.get("status") != "pass" or block.get("findings") != []:
+        return "evidence report does not show a clean pass"
+    return None
+
+
+def _static_check_tier1_reason(path, source, tree):
+    """Per the Issue 13 P4 final ruling, tier1 evidence must be a canonical
+    project_static_check report (not a render_check page): a flat document
+    binding this item's source identity, tool provenance, and a tier1
+    status/findings block with no blocker findings when it claims pass."""
+    report = _static_check_report(path)
+    if report is None:
+        return "evidence must be a typed project_static_check report, not a screenshot reference or wrong report kind"
+    if report.get("source_sha256") != source:
+        return "evidence report does not match this item's source_sha256"
+    if tree is not None and report.get("source_tree_sha256") != tree:
+        return "evidence report does not match this item's source_tree_sha256"
+    tool = report.get("tool")
+    if (not isinstance(tool, dict) or not isinstance(tool.get("name"), str) or not tool["name"]
+            or not any(isinstance(tool.get(key), str) and tool[key]
+                       for key in ("version", "command", "config"))):
+        return "evidence report is missing tool provenance (name plus version, command, or config)"
+    block = report.get("tier1")
+    if not isinstance(block, dict) or block.get("status") not in ("pass", "fail", "incomplete"):
+        return "evidence report has no valid tier1 status"
+    findings = block.get("findings")
+    if not isinstance(findings, list) or any(
+            not isinstance(row, dict) or row.get("severity") not in ("blocker", "review")
+            or not isinstance(row.get("message"), str) or not row["message"]
+            for row in findings):
+        return "evidence report has malformed findings"
+    if block["status"] == "pass" and any(row["severity"] == "blocker" for row in findings):
+        return "evidence report status contradicts its own blocker findings"
+    if block["status"] != "pass":
+        return "evidence report does not show a clean pass"
+    return None
+
+
+def _typed_tier_reason(item, tier, checks, meta, round_dir):
+    """Strict typed adoption evidence for a scope_contract=scoped_v1 round. Per the
+    Issue 13 P4 final ruling: tier2 evidence must be a render_check report (the
+    renderer only records real tier2 render checks); tier1 evidence must be a
+    project_static_check report binding source identity plus tool provenance.
+    Using the wrong report kind for either tier is rejected, not silently
+    accepted, and this gate cannot be bypassed by omitting a marker on a scoped
+    round."""
+    check = checks.get(tier, {}) if isinstance(checks, dict) else {}
+    refs = check.get("evidence", []) if isinstance(check, dict) else []
+    if not isinstance(check, dict) or not isinstance(refs, list) or not refs:
+        return f"{tier} evidence is failed or unverified"
+    manifest = meta.get("evidence_manifest", {})
+    source = meta.get("source_sha256", {}).get(item)
+    tree = meta.get("source_tree_sha256", {}).get(item) if meta.get("source_tree_sha256") else None
+    rubric_sha256 = meta.get("rubric_sha256")
+    for ref in refs:
+        if not isinstance(ref, str) or ref not in manifest:
+            return f"{tier} evidence reference is missing from the manifest"
+        artifact = manifest[ref]
+        path = Path(artifact["path"])
+        if not path.is_absolute():
+            path = round_dir / path
+        reason = (_render_check_tier2_reason(path, source, tree, rubric_sha256) if tier == "tier2"
+                  else _static_check_tier1_reason(path, source, tree))
+        if reason:
+            return f"{tier} {reason}"
+    return None
+
+
+def adoption_report(rubric, dims, contestants, valid, stats, meta, round_dir):
     gate = rubric.get("adoption_gate")
     rules = rubric.get("rules_version", 1)
     if gate is None and rules < 3:
@@ -232,9 +351,18 @@ def adoption_report(rubric, dims, contestants, valid, stats, meta):
              "This is expert judgment, not measured usability, a percentage of compliance, or release approval.",
              "Floors apply to every kept reviewer, not only the average. Missing scores never become zero.", ""]
     lines += ["| Item | Design total /100 | Adoption | Reasons |", "|---|---|---|---|"]
+    # Typed tier gating is forced for any round marked scope_contract=scoped_v1,
+    # Typed tier gating is forced for any round carrying a scope_contract key at
+    # all (scoped_v1 *or* the legacy_unscoped compatibility marker), independent
+    # of (and not bypassable by omitting) adoption_evidence_version. A newly
+    # created legacy_unscoped round cannot lean on old hand-written passes; only
+    # a historically unmarked round (no scope_contract key whatsoever) keeps the
+    # pre-Issue-13 loose, self-declared outcome below, untouched.
+    typed = meta.get("adoption_evidence_version") == 2 or "scope_contract" in meta
     for item in contestants:
         s = stats[item]
         reasons = []
+        notes = []
         if gate is None:
             reasons.append("project adoption thresholds are not declared")
         if s["mean"] is None:
@@ -254,6 +382,11 @@ def adoption_report(rubric, dims, contestants, valid, stats, meta):
             declared = meta.get("adoption_checks", {})
             checks = declared.get(item, {}) if isinstance(declared, dict) else {}
             for tier in ("tier1", "tier2"):
+                if typed:
+                    reason = _typed_tier_reason(item, tier, checks, meta, round_dir)
+                    if reason:
+                        reasons.append(reason)
+                    continue
                 check = checks.get(tier, {}) if isinstance(checks, dict) else {}
                 if (not isinstance(check, dict) or check.get("status") != "pass"
                         or not isinstance(check.get("evidence"), list) or not check["evidence"]
@@ -261,6 +394,14 @@ def adoption_report(rubric, dims, contestants, valid, stats, meta):
                                or not ref.startswith(f"{item}/")
                                for ref in check["evidence"])):
                     reasons.append(f"{tier} evidence is failed or unverified")
+            if not typed:
+                # A historically unmarked round's tier pass/fail is the
+                # reviewer's own self-declared status, never independently
+                # bound to a typed report. Surface that plainly as a
+                # non-blocking note (not a reason), so it can never flip
+                # ADOPTABLE/NOT_ADOPTABLE for a round that already passed
+                # before Issue 13's typed evidence rules existed.
+                notes.append("tier checks self-declared (legacy binding)")
             zoom = meta.get("target_profiles", {}).get("desktop_zoom")
             if zoom and zoom.get("percentages"):
                 check = checks.get("desktop_zoom", {}) if isinstance(checks, dict) else {}
@@ -282,7 +423,8 @@ def adoption_report(rubric, dims, contestants, valid, stats, meta):
         total = "unavailable" if s["mean"] is None else fmt(design_total(s["mean"]))
         status = "NOT_ADOPTABLE" if reasons else "ADOPTABLE"
         outcomes[meta["reveal"][item]] = status
-        lines.append(f"| {item} | {total} | {status} | {'; '.join(reasons) or 'Declared gates and score floors met'} |")
+        message = "; ".join(reasons + notes) or "Declared gates and score floors met"
+        lines.append(f"| {item} | {total} | {status} | {message} |")
     if rules >= 3:
         lines += ["", "### Category scores", "",
                   "| Item | Group | Dimension | Raw mean /10 | Score /100 | Required floor /10 |",
@@ -382,6 +524,71 @@ def score_round(rubric, dims, round_dir, previous_keep):
     references = check_evidence(meta, items, round_dir) if rules >= 3 else None
     if rules >= 3:
         check_profile_evidence(meta, round_dir)
+    truncations = meta.get("capture_truncations")
+    if truncations:
+        # round_prep already exits nonzero when a full-page capture is clamped,
+        # but round.json is persisted first (forensics); the council must never
+        # adopt a round built on a truncated capture, so refuse the whole run.
+        raise RunError(f"{round_dir}: capture_truncations is non-empty: {truncations}")
+    contract = meta.get("scope_contract")
+    if contract is not None:
+        # A marked round (anything carrying scope_contract) is held to the new
+        # Issue 13 scope-intake rules; a historically unmarked round (no key at
+        # all) keeps its exact pre-existing meaning below, untouched.
+        if contract not in ("scoped_v1", "legacy_unscoped"):
+            raise RunError(f"{round_dir}: unsupported scope_contract {contract!r}")
+        if contract == "scoped_v1" and "scope_refs" not in meta:
+            raise RunError(
+                f"{round_dir}: scope_contract scoped_v1 requires scope_refs; "
+                "a marked scoped round cannot silently fall back to legacy")
+        if contract == "legacy_unscoped" and "scope_refs" in meta:
+            raise RunError(
+                f"{round_dir}: scope_contract legacy_unscoped must not declare scope_refs")
+        manifest = meta.get("evidence_manifest", {})
+        missing_design = [item for item in items if f"{item}/DESIGN.md" not in manifest]
+        if missing_design:
+            raise RunError(f"{round_dir}: DESIGN.md evidence is required for {missing_design}")
+    scope_lines = (["Scope: legacy_unscoped (declared compatibility path).", ""]
+                   if contract == "legacy_unscoped" else ["Scope: undeclared (legacy)", ""])
+    if "scope_refs" in meta:
+        refs = meta["scope_refs"]
+        if not isinstance(refs, dict) or set(refs) != {"brief", "directions"}:
+            raise RunError("scope_refs must bind brief and directions")
+        scope_data = {}
+        scope_paths = {}
+        manifest = meta.get("evidence_manifest", {})
+        for key, ref in refs.items():
+            record = manifest.get(ref)
+            if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+                raise RunError(f"scope {key} evidence is missing")
+            path = Path(record["path"])
+            path = path if path.is_absolute() else round_dir / path
+            try:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError as error:
+                raise RunError(f"scope {key} evidence unavailable: {error}") from error
+            if record.get("sha256") != digest:
+                raise RunError(f"scope {key} evidence digest changed")
+            scope_data[key] = load(path)
+            scope_paths[key] = path
+        directions = scope_data["directions"]
+        if (not isinstance(directions, list)
+                or not all(isinstance(row, dict) for row in directions)
+                or {row.get("id") for row in directions} != {reveal[item] for item in contestants}
+                or len(directions) != len(contestants)):
+            raise RunError("scope directions must match all non-calibration prototypes")
+        scoped = INTAKE.validate(
+            scope_data["brief"], root=scope_paths["brief"].parent,
+            current_brief_path=scope_paths["brief"], directions=directions)
+        blockers = [row["message"] for row in scoped["findings"] if row["severity"] == "blocker"]
+        if blockers:
+            raise RunError("invalid scope intake: " + "; ".join(blockers))
+        scope_lines = [scoped["scope_header"], ""]
+        for name, coverage in scoped["directions"].items():
+            scope_lines.append(
+                f"- {name}: covered {coverage['covered']}/{coverage['total']}; "
+                f"reachable {coverage['reachable']}/{coverage['total']} (declared, separate from craft)")
+        scope_lines.append("")
 
     sheets = sorted(round_dir.glob("reviewer-*.json"))
     if not sheets or len(sheets) > caps["max_reviewers"]:
@@ -394,10 +601,21 @@ def score_round(rubric, dims, round_dir, previous_keep):
     if len({s["reviewer"] for s in loaded}) != len(loaded):
         raise RunError(f"{round_dir}: reviewer identities must be unique")
     orders = [tuple(s["order"]) for s in loaded]
-    if len(items) > 2 and len(set(orders)) != len(orders):
+    reviewer_orders = meta.get("reviewer_orders")
+    if reviewer_orders is not None:
+        if not isinstance(reviewer_orders, dict):
+            raise RunError(f"{round_dir}: reviewer_orders must be an object")
+        for sheet in loaded:
+            assigned = reviewer_orders.get(sheet["reviewer"])
+            if assigned is None:
+                raise RunError(f"{round_dir}: reviewer {sheet['reviewer']} has no assigned order")
+            if list(sheet["order"]) != list(assigned):
+                raise RunError(
+                    f"{round_dir}: reviewer {sheet['reviewer']} did not review in its assigned order")
+    elif len(items) > 2 and len(set(orders)) != len(orders):
         raise RunError(f"{round_dir}: reviewers must see different shuffled orders")
 
-    lines = [f"# Round {meta['round']}", "",
+    lines = [f"# Round {meta['round']}", "", *scope_lines,
              f"Model: {meta['model']}. Browser: {meta['browser']}. Date: {meta['date']}.",
              f"Reviewers: {len(loaded)}. Calibration margin required: "
              f"{fmt(rubric['calibration_margin'])}.", "", "## Calibration", "",
@@ -453,7 +671,7 @@ def score_round(rubric, dims, round_dir, previous_keep):
         per_dim = {d["id"]: [s["scores"][item][d["id"]]["score"] for s in valid] for d in dims}
         stats[item] = {"mean": sum(totals) / len(totals), "spread": max(totals) - min(totals),
                        "critical": critical, "dims": per_dim}
-    adoption_lines, outcomes = adoption_report(rubric, dims, contestants, valid, stats, meta)
+    adoption_lines, outcomes = adoption_report(rubric, dims, contestants, valid, stats, meta, round_dir)
     lines += adoption_lines
     if any(stats[item]["mean"] is None for item in contestants):
         lines += ["## Verdict", "", "VOID", "",
